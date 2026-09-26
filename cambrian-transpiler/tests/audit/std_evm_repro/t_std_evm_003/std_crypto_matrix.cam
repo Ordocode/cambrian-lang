@@ -1,0 +1,22 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-STD-EVM-003: phase-1 std::crypto semantic gate (forge).
+
+entity StdCryptoMatrix {
+    routes {
+        constructor() => []
+
+        runStdSha256() -> bytes => [
+            return(std::crypto::sha256("abc"))
+        ]
+
+        runEvmSha256() -> U256 => [
+            return(evm::sha256("abc"))
+        ]
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+    }
+}

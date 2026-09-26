@@ -1,0 +1,15 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity StmtProbe {
+routes {
+constructor() => []
+check(flag: bool) -> u64 => [
+if flag => [
+let y = 5;
+]
+return(y)
+]
+}
+m_count: u64 { in constructor() => 0 }
+}

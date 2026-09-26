@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a978fff1f6aee0bbae3ea385da56963c094bbe5910e962bd476f3ee772d5b634 # shrinks to case = MiniProgram { entity_name: "A", member_name: "m_a", route_name: "a", param_type: "u8", use_return_route: true }

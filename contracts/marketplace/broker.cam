@@ -1,0 +1,29 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Broker: clearing house in a 3-entity marketplace system.
+// Accepts createOrder() only from Shop (via from clause).
+// Immediately forwards recordSale() to Ledger via AddressOf.
+
+entity Broker {
+
+    identity m_shop_id: u64
+
+    routes {
+        constructor() => []
+
+        createOrder(item_id: u64, price: U256)
+            from Shop(m_shop_id) => [
+                recordSale(item_id, price) ~> Ledger.address(m_shop_id)
+            ]
+
+        view getProcessed() -> u64 => [
+            return(m_processed)
+        ]
+    }
+
+    m_processed: u64 {
+        in constructor() => 0
+        in createOrder(_, _) => m_processed + 1
+    }
+}

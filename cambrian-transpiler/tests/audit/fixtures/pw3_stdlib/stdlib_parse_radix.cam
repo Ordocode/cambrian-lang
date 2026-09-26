@@ -1,0 +1,31 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-010: parse_uint radix discrimination (dec vs hex).
+
+entity StdParseRadix {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        parseDecFf() -> u64 => [
+            let r = match std::str::parse_uint("ff", 10) {
+                some(x) => x,
+                none => 999,
+            };
+            return(r)
+        ]
+
+        parseHexFf() -> u64 => [
+            let r = match std::str::parse_uint("ff", 16) {
+                some(x) => x,
+                none => 999,
+            };
+            return(r)
+        ]
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+    }
+}

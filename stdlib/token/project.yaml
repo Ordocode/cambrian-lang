@@ -1,0 +1,58 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+# EVM build of the standard-library token suite.
+#
+# The `.mut.cam` negative specs are deliberately false and belong to the
+# Lean mutation build, where `runMutation*` inverts them. Listing them here
+# would report a healthy suite as red.
+name: stdlib-token
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - ERC20.cam
+  - ERC20.test.cam
+  - ERC20.fuzz.cam
+  - ERC20.invariant.cam
+  - ERC20Multi.cam
+  - ERC20Multi.test.cam
+  - ERC20Multi.fuzz.cam
+  - ERC20Multi.invariant.cam
+  - ERC7943Min.cam
+  - ERC7943Min.test.cam
+  - ERC7943Min.fuzz.cam
+  - ERC7943Min.invariant.cam
+  - ERC7943.cam
+  - ERC7943.test.cam
+  - ERC7943.fuzz.cam
+  - ERC7943.invariant.cam
+
+fuzz:
+  runs: 64
+  seed: 1
+  shrink: true
+  max_local_rejects: 4096
+
+invariant:
+  runs: 16
+  depth: 16
+  fail_on_revert: false
+  seed: 1
+
+foundry:
+  optimizer: true
+  # via_ir is off for the *suite*, not for the entities.
+  #
+  # The transpiler emits one `_stdlib-token_project.sol` holding every entity
+  # plus a factory that grew a deploy/predict pair per entity. At four
+  # entities the IR optimizer runs one slot short of placing a stack variable
+  # and the whole build fails with a Yul exception naming no function.
+  # Compiling `ERC7943.cam` on its own with `via_ir: true` succeeds, so this
+  # is the bundling, not the code an adopter would deploy. Turning the
+  # optimizer off also makes it pass, which is the other tell that this is a
+  # placement limit rather than a semantic one.
+  #
+  # Revisit when the EVM backend emits per-entity compilation units, or when
+  # the factory stops carrying every entity's creation code.
+  via_ir: false

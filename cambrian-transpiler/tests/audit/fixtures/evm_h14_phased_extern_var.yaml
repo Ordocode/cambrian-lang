@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: evm-h14-audit
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - evm_h14_phased_extern_var.cam

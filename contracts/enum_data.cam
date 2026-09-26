@@ -1,0 +1,32 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+enum Action {
+    Deposit(u64),
+    Withdraw(u64, String),
+    Reset
+}
+
+entity EnumData {
+
+    routes {
+        apply(action: Action) => []
+        view get_balance() -> u64 => [
+            return(m_balance)
+        ]
+    }
+
+    m_balance: u64 {
+        in apply(action) => {
+            match action {
+                Action::Deposit(amount) => m_balance + amount,
+                Action::Withdraw(amount, _reason) => m_balance - amount,
+                Action::Reset => 0
+            }
+        }
+    }
+
+    m_last_action: Action {
+        in apply(action) => action
+    }
+}

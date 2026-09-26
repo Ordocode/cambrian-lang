@@ -1,0 +1,651 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Unit tests for ERC4626Min.
+//
+// Every route on this vault reads the asset's balance of the vault
+// (`balanceOf(sys::address) ~> m_asset`), so none of them can be reached from
+// a suite that drives a single instance: `m_asset` would sit at the zero
+// address and the first call would revert on an empty account. Each test
+// therefore stands up a real ERC20Multi, deploys the vault against it, and
+// approves the vault before depositing — which is also the flow a caller
+// actually performs, so the suite exercises the allowance leg for free.
+//
+// Two conventions run through the file:
+//
+//   - The test contract (`sys::address`) is the asset's initial holder and
+//     the depositor. It is `msg::sender` for every `call`, so the vault's
+//     `transferFrom(msg::sender, …)` pulls from it.
+//   - The exchange rate is bent by transferring the asset straight to the
+//     vault rather than by simulating yield. `totalAssets` is the real
+//     balance, so a direct transfer is the whole mechanism, and it is also
+//     the shape of the attack §7 of the BLS places out of scope.
+//
+// Asset constructor argument order:
+//   (name, symbol, decimals, minter, initial_holder, initial_supply)
+
+// ---------------------------------------------------------------------
+// S07 / P0-11 — the asset address
+// ---------------------------------------------------------------------
+
+test "the vault answers the asset it was deployed against" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call asset()
+    expect return tok
+}
+
+test "the asset address does not move across calls" for ERC4626Min {
+    let recv = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call asset()
+    expect return tok
+    call deposit(100, recv)
+    call asset()
+    expect return tok
+}
+
+test "the share carries its own metadata" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 6, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 6) with { m_asset: tok }
+
+    call name()
+    expect return "Vault Share"
+    call symbol()
+    expect return "vAST"
+    call decimals()
+    expect return 6
+}
+
+test "a fresh vault holds nothing and has issued nothing" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call totalAssets()
+    expect return 0
+    call totalSupply()
+    expect return 0
+}
+
+// ---------------------------------------------------------------------
+// S01 — deposit
+// ---------------------------------------------------------------------
+
+// The empty-vault branch: no rate has been set, so the vault answers one
+// share per asset. This is the branch `ERC4626.cam` removes, and the reason
+// it removes it is the test two sections down.
+test "the first deposit issues one share per asset" for ERC4626Min {
+    let recv = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, recv)
+    expect return 100
+
+    call totalSupply()
+    expect return 100
+    call balanceOf(recv)
+    expect return 100
+    call totalAssets()
+    expect return 100
+}
+
+test "a second deposit at an unchanged rate issues the same shares" for ERC4626Min {
+    let recv = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, recv)
+    call deposit(50, recv)
+    expect return 50
+
+    call totalSupply()
+    expect return 150
+    call balanceOf(recv)
+    expect return 150
+    call totalAssets()
+    expect return 150
+}
+
+// P0-3. The asset's own `transferFrom` throws 3 on a short allowance, and the
+// vault does not catch it — the deposit reverts with the asset's code, which
+// is what "the vault MAY NOT transfer the complete asset amount" means in
+// §4 S01 of the BLS.
+test "a deposit above the approved allowance reverts" for ERC4626Min {
+    let recv = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 40)
+    call deposit(100, recv)
+    expect throw 3
+}
+
+test "a deposit with no approval at all reverts" for ERC4626Min {
+    let recv = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call deposit(100, recv)
+    expect throw 3
+}
+
+test "a deposit to the zero address throws 20" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, 0x0000000000000000000000000000000000000000000000000000000000000000)
+    expect throw 20
+}
+
+// ---------------------------------------------------------------------
+// S02 — mint
+// ---------------------------------------------------------------------
+
+test "mint issues exactly the shares asked for" for ERC4626Min {
+    let recv = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call mint(100, recv)
+    expect return 100
+
+    call balanceOf(recv)
+    expect return 100
+    call totalSupply()
+    expect return 100
+    call totalAssets()
+    expect return 100
+}
+
+test "mint to the zero address throws 20" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call mint(100, 0x0000000000000000000000000000000000000000000000000000000000000000)
+    expect throw 20
+}
+
+// ---------------------------------------------------------------------
+// S03 — withdraw
+// ---------------------------------------------------------------------
+
+test "withdraw burns the shares and sends the assets" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call withdraw(40, sys::address, sys::address)
+    expect return 40
+
+    call totalSupply()
+    expect return 60
+    call balanceOf(sys::address)
+    expect return 60
+    call totalAssets()
+    expect return 60
+    call tok.balanceOf(vault)
+    expect return 60
+}
+
+// Two ways to ask for more than you can have, and they are different
+// failures. When the owner is the vault's only depositor the two coincide,
+// and the vault reports the one it checks first — 23, "the vault does not
+// hold that much" — which is the more informative of the two.
+test "withdrawing more than the sole depositor put in throws 23" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call maxWithdraw(sys::address)
+    expect return 100
+    call withdraw(101, sys::address, sys::address)
+    expect throw 23
+}
+
+// P0-10 for the withdrawal side, with the two failures separated: another
+// depositor's assets are in the vault, so 23 is satisfied and the burn is
+// what the owner cannot cover.
+test "withdrawing above the owner's own stake throws 21" for ERC4626Min {
+    let other = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(40, sys::address)
+    call deposit(200, other)
+
+    // The vault holds 240 and the owner's shares are worth 40 of it.
+    call totalAssets()
+    expect return 240
+    call maxWithdraw(sys::address)
+    expect return 40
+    call withdraw(41, sys::address, sys::address)
+    expect throw 21
+}
+
+test "withdraw to the zero address throws 20" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call withdraw(10, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address)
+    expect throw 20
+}
+
+test "withdraw with the zero address as owner throws 20" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call withdraw(10, sys::address, 0x0000000000000000000000000000000000000000000000000000000000000000)
+    expect throw 20
+}
+
+// ---------------------------------------------------------------------
+// S04 — redeem
+// ---------------------------------------------------------------------
+
+test "redeem burns exactly the shares given" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call redeem(40, sys::address, sys::address)
+    expect return 40
+
+    call totalSupply()
+    expect return 60
+    call balanceOf(sys::address)
+    expect return 60
+    call totalAssets()
+    expect return 60
+}
+
+test "redeeming above the owner's balance throws 21" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call maxRedeem(sys::address)
+    expect return 100
+    call redeem(101, sys::address, sys::address)
+    expect throw 21
+}
+
+// ---------------------------------------------------------------------
+// S05 / P0-1 / P0-2 — the share allowance on the way out
+// ---------------------------------------------------------------------
+
+// The owner never needs an allowance against themselves. Without this branch
+// every router-free withdrawal would require a self-approval first, and the
+// three tests above would not pass.
+test "the owner withdraws their own stake with no allowance" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call allowance(sys::address, sys::address)
+    expect return 0
+    call withdraw(10, sys::address, sys::address)
+    expect return 10
+}
+
+// P0-1. The stake belongs to `owner`, the caller is the test contract, and
+// nothing was approved.
+test "withdrawing another address's stake without an allowance throws 22" for ERC4626Min {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, owner)
+    call withdraw(10, sys::address, owner)
+    expect throw 22
+}
+
+// P0-2, same shape on the share-denominated route.
+test "redeeming another address's stake without an allowance throws 22" for ERC4626Min {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, owner)
+    call redeem(10, sys::address, owner)
+    expect throw 22
+}
+
+// ---------------------------------------------------------------------
+// The rate, bent by a direct transfer
+// ---------------------------------------------------------------------
+//
+// 100 shares against 350 assets: a rate of 3.5 assets per share, which makes
+// every conversion below inexact and separates the four rounding directions
+// by exactly one unit. The 250 arrives by `tok.transfer(vault, 250)` — the
+// vault has no route that accepts it, which is the point: `totalAssets` is
+// the real balance, so value can enter without a share being issued.
+
+test "a direct transfer moves the rate without issuing a share" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call totalAssets()
+    expect return 350
+    call totalSupply()
+    expect return 100
+}
+
+// P0-5 and P0-7 read against the same state: 10 assets is 2.857… shares, and
+// the two routes answer the two sides of it.
+test "previewDeposit rounds the shares down and previewWithdraw rounds them up" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call previewDeposit(10)
+    expect return 2
+    call previewWithdraw(10)
+    expect return 3
+    // The unbiased pair sits with the deposit side.
+    call convertToShares(10)
+    expect return 2
+}
+
+// P0-6 and P0-8: 3 shares is 10.5 assets.
+test "previewMint rounds the assets up and previewRedeem rounds them down" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call previewMint(3)
+    expect return 11
+    call previewRedeem(3)
+    expect return 10
+    call convertToAssets(3)
+    expect return 10
+}
+
+// P0-9 for the deposit leg: the preview and the write agree at the same state.
+test "deposit answers what previewDeposit promised" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call previewDeposit(10)
+    expect return 2
+    call deposit(10, sys::address)
+    expect return 2
+}
+
+test "mint answers what previewMint promised" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call previewMint(3)
+    expect return 11
+    call mint(3, sys::address)
+    expect return 11
+}
+
+test "withdraw answers what previewWithdraw promised" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call previewWithdraw(10)
+    expect return 3
+    call withdraw(10, sys::address, sys::address)
+    expect return 3
+}
+
+test "redeem answers what previewRedeem promised" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call previewRedeem(3)
+    expect return 10
+    call redeem(3, sys::address, sys::address)
+    expect return 10
+}
+
+// The rounding is not decoration: at a rate above one share, a deposit small
+// enough rounds to nothing and the caller has paid for a share they did not
+// get. §7 of the BLS declines to claim otherwise, and this is the test that
+// makes the refusal concrete rather than a hedge.
+test "a deposit below the price of one share issues nothing" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call deposit(3, sys::address)
+    expect return 0
+    call totalSupply()
+    expect return 100
+    call totalAssets()
+    expect return 353
+}
+
+// ---------------------------------------------------------------------
+// S08 — limits
+// ---------------------------------------------------------------------
+
+test "the deposit side is uncapped" for ERC4626Min {
+    let recv = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call maxDeposit(recv)
+    expect return 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    call maxMint(recv)
+    expect return 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+}
+
+// P0-10 with content: the limit tracks the rate, so it is not the type's
+// ceiling and one unit above it reverts.
+test "maxWithdraw tracks the rate and one unit above it reverts" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    // 100 shares at 3.5 assets each, rounded down.
+    call maxWithdraw(sys::address)
+    expect return 350
+    // The owner holds every share, so one unit above the limit is also one
+    // unit above what the vault holds, and 23 is the guard that fires.
+    call withdraw(351, sys::address, sys::address)
+    expect throw 23
+}
+
+test "maxRedeem is the owner's share balance" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+
+    call maxRedeem(sys::address)
+    expect return 100
+    call redeem(101, sys::address, sys::address)
+    expect throw 21
+}
+
+// ---------------------------------------------------------------------
+// P0-4 — read routes change no state
+// ---------------------------------------------------------------------
+
+test "the read routes leave the ledger alone" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+
+    call totalAssets()
+    call convertToShares(7)
+    call convertToAssets(7)
+    call previewDeposit(7)
+    call previewMint(7)
+    call previewWithdraw(7)
+    call previewRedeem(7)
+    call maxDeposit(sys::address)
+    call maxWithdraw(sys::address)
+
+    expect state { m_total_supply: 100 }
+    call balanceOf(sys::address)
+    expect return 100
+    call totalAssets()
+    expect return 100
+}
+
+// ---------------------------------------------------------------------
+// P1-2 — the share is an ERC-20
+// ---------------------------------------------------------------------
+//
+// The full ERC-20 claim set is the base token's suite; what is tested here is
+// that the share ledger this vault writes is reachable through that surface,
+// and that the vault routes and the token routes agree about it.
+
+test "shares transfer like a token" for ERC4626Min {
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call transfer(bob, 30)
+
+    call balanceOf(sys::address)
+    expect return 70
+    call balanceOf(bob)
+    expect return 30
+    call totalSupply()
+    expect return 100
+}
+
+test "a share transfer above the balance throws 2" for ERC4626Min {
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call transfer(bob, 101)
+    expect throw 2
+}
+
+test "a share transfer to the zero address throws 7" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call transfer(0x0000000000000000000000000000000000000000000000000000000000000000, 10)
+    expect throw 7
+}
+
+test "a zero-amount share transfer throws 1" for ERC4626Min {
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call transfer(bob, 0)
+    expect throw 1
+}
+
+// A share transfer to yourself is the aliasing case the base token's balance
+// transform guards: computed naively it credits the sender their pre-state
+// balance plus the amount and mints value out of nothing.
+test "a share transfer to yourself is a no-op" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call transfer(sys::address, 40)
+
+    call balanceOf(sys::address)
+    expect return 100
+    call totalSupply()
+    expect return 100
+}
+
+test "approving zero as a share spender throws 7" for ERC4626Min {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call approve(0x0000000000000000000000000000000000000000000000000000000000000000, 10)
+    expect throw 7
+}
+
+test "a share approval is readable" for ERC4626Min {
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626Min("Vault Share", "vAST", 18) with { m_asset: tok }
+
+    call approve(bob, 55)
+    call allowance(sys::address, bob)
+    expect return 55
+}

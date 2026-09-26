@@ -1,0 +1,25 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H6: phased receive() bodies (and phased member
+// transforms) are silently dropped — only Unphased actions are emitted.
+
+entity Recorder {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        accept receive() => [
+            credit: []
+        ]
+        getTotal() -> u128 => [
+            return(m_total)
+        ]
+    }
+
+    m_total: u128 {
+        in constructor() => 0
+        in receive() => credit: m_total + msg::value as u128
+    }
+}

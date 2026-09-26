@@ -1,0 +1,420 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// @from: verification-plan INV-TCORE-001; BLS §5 V-01; PD §5 V-01
+invariant "INV-TCORE-001 fixed supply cap" for TokenCore {
+    init { m_total_supply: INITIAL_SUPPLY }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action transfer(to: address, amount: U256) { }
+    action approve(spender: address, amount: U256) { }
+    action transferFrom(from_addr: address, to: address, amount: U256) { }
+    action burn(amount: U256) { }
+
+    check totalSupply() <= INITIAL_SUPPLY
+}
+
+// @from: verification-plan INV-TCORE-002; BLS §5 V-03; PD §5 V-03
+invariant "INV-TCORE-002 balance sum equals supply" for TokenCore {
+    init { m_total_supply: INITIAL_SUPPLY }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action transfer(to: address, amount: U256) { }
+    action approve(spender: address, amount: U256) { }
+    action transferFrom(from_addr: address, to: address, amount: U256) { }
+    action burn(amount: U256) { }
+
+    check sum_values(m_balances) == m_total_supply
+}
+
+// @from: verification-plan INV-TCORE-004; PD §5 recommended invariant
+invariant "INV-TCORE-004 no balance exceeds supply" for TokenCore {
+    init { m_total_supply: INITIAL_SUPPLY }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action transfer(to: address, amount: U256) { }
+    action approve(spender: address, amount: U256) { }
+    action transferFrom(from_addr: address, to: address, amount: U256) { }
+    action burn(amount: U256) { }
+
+    check max_balance(m_balances) <= m_total_supply
+}
+
+// @from: verification-plan INV-TCORE-010; BLS §4.1 DeployToken; PD UC-01
+property "PROP-001 constructor mints fixed supply once" () for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob: address = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    msg { sender: deployer }
+    call constructor()
+    expect state { m_total_supply: INITIAL_SUPPLY }
+    call totalSupply()
+    expect return INITIAL_SUPPLY
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY
+    call balanceOf(bob)
+    expect return 0
+}
+
+// @from: verification-plan PROP-002; BLS §4.1; PD UC-01
+property "PROP-002 constructor balance neutral for non deployer" () for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let carol: address = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    msg { sender: deployer }
+    call constructor()
+    call balanceOf(carol)
+    expect return 0
+}
+
+// @from: verification-plan PROP-003; BLS §4.2 TransferTokens; PD UC-02
+property "PROP-003 transfer conservation" (to: address, amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+    assume to != ZERO_ADDRESS && to != deployer
+
+    msg { sender: deployer }
+    call constructor()
+    call transfer(to, amount)
+    expect state { m_total_supply: INITIAL_SUPPLY }
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY - amount
+    call balanceOf(to)
+    expect return amount
+}
+
+// @from: verification-plan PROP-004; BLS §4.2; PD §5 V-05
+property "PROP-004 transfer insufficient balance reverts" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob: address = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    assume amount > INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call transfer(bob, amount)
+    expect throw 202
+}
+
+// @from: verification-plan PROP-004; BLS §4.2 zero recipient; PD §5 V-05
+property "PROP-004 transfer zero recipient reverts" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    assume amount <= INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call transfer(ZERO_ADDRESS, amount)
+    expect throw 201
+}
+
+// @from: verification-plan PROP-006; BLS §4.2 zero amount; qa-plan edge
+property "PROP-006 zero amount transfer succeeds" () for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob: address = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    msg { sender: deployer }
+    call constructor()
+    call transfer(bob, 0)
+    expect state { m_total_supply: INITIAL_SUPPLY }
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY
+    call balanceOf(bob)
+    expect return 0
+}
+
+// @from: verification-plan PROP-005; BLS §4.2 self-transfer; qa-plan U-012
+property "PROP-005 self transfer identity" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call transfer(deployer, amount)
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY
+}
+
+// @from: verification-plan PROP-010; BLS §4.3 ApproveAllowance; PD UC-03
+property "PROP-010 approve sets allowance" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender: address = 0x0000000000000000000000000000000000000000000000000000000000000a03
+
+    assume amount <= INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call approve(spender, amount)
+    expect state { m_total_supply: INITIAL_SUPPLY }
+    call allowance(deployer, spender)
+    expect return amount
+}
+
+// @from: verification-plan PROP-011; BLS §4.3; PD §5 V-05
+property "PROP-011 approve zero address guard" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    msg { sender: deployer }
+    call constructor()
+    call approve(ZERO_ADDRESS, amount)
+    expect throw 201
+}
+
+// @from: verification-plan PROP-020; BLS §4.4 TransferFromAllowance; PD UC-04
+property "PROP-020 transferFrom moves balances and debits allowance" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender: address = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let recipient: address = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call approve(spender, amount)
+    msg { sender: spender }
+    call transferFrom(deployer, recipient, amount)
+    msg { sender: deployer }
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY - amount
+    call balanceOf(recipient)
+    expect return amount
+    call allowance(deployer, spender)
+    expect return 0
+    call totalSupply()
+    expect return INITIAL_SUPPLY
+}
+
+// @from: verification-plan PROP-021; BLS §5 V-06; PD §5 V-06
+property "PROP-021 transferFrom unauthorized caller reverts" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let attacker: address = 0x0000000000000000000000000000000000000000000000000000000000000a05
+    let recipient: address = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    msg { sender: attacker }
+    call transferFrom(deployer, recipient, amount)
+    expect throw 203
+}
+
+// @from: verification-plan PROP-021; BLS §5 V-06 owner path
+property "PROP-021 owner self transferFrom succeeds" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let recipient: address = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+    assume recipient != ZERO_ADDRESS && recipient != deployer
+
+    msg { sender: deployer }
+    call constructor()
+    msg { sender: deployer }
+    call transferFrom(deployer, recipient, amount)
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY - amount
+    call balanceOf(recipient)
+    expect return amount
+    call totalSupply()
+    expect return INITIAL_SUPPLY
+}
+
+// @from: verification-plan PROP-022; BLS §4.4; PD §5 V-05
+property "PROP-022 transferFrom insufficient allowance reverts" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender: address = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let recipient: address = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    assume amount > 1 && amount <= INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call approve(spender, amount - 1)
+    msg { sender: spender }
+    call transferFrom(deployer, recipient, amount)
+    expect throw 203
+}
+
+// @from: verification-plan PROP-024; BLS §4.4 zero recipient; PD §5 V-05
+property "PROP-024 transferFrom zero recipient reverts" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender: address = 0x0000000000000000000000000000000000000000000000000000000000000a03
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call approve(spender, amount)
+    msg { sender: spender }
+    call transferFrom(deployer, ZERO_ADDRESS, amount)
+    expect throw 201
+}
+
+// @from: verification-plan PROP-023; BLS §4.4; PD §5 V-05
+property "PROP-023 transferFrom insufficient balance reverts" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender: address = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let recipient: address = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    assume amount > INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call approve(spender, amount)
+    msg { sender: spender }
+    call transferFrom(deployer, recipient, amount)
+    expect throw 202
+}
+
+// @from: verification-plan INV-TCORE-003 / PROP-030; BLS §5 V-02; PD §5 V-02
+property "PROP-030 approve preserves total supply" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender: address = 0x0000000000000000000000000000000000000000000000000000000000000a03
+
+    assume amount <= INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call approve(spender, amount)
+    expect state { m_total_supply: INITIAL_SUPPLY }
+    call totalSupply()
+    expect return INITIAL_SUPPLY
+}
+
+// @from: verification-plan INV-TCORE-003 / PROP-030; BLS §5 V-02
+property "PROP-030 transferFrom preserves total supply" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender: address = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let recipient: address = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call approve(spender, amount)
+    msg { sender: spender }
+    call transferFrom(deployer, recipient, amount)
+    expect state { m_total_supply: INITIAL_SUPPLY }
+    call totalSupply()
+    expect return INITIAL_SUPPLY
+}
+
+// @from: verification-plan PROP-030; BLS §5 V-02; PD §5 V-02
+property "PROP-030 transfer and burn do not increase supply" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob: address = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY / 2
+
+    msg { sender: deployer }
+    call constructor()
+    call transfer(bob, amount)
+    expect state { m_total_supply: INITIAL_SUPPLY }
+    msg { sender: bob }
+    call burn(amount)
+    expect state { m_total_supply: INITIAL_SUPPLY - amount }
+}
+
+// @from: BLS §3 Maximum allowance; PD §5 V-04
+property "PROP-020 transferFrom infinite allowance not decremented" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender: address = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let recipient: address = 0x0000000000000000000000000000000000000000000000000000000000000a04
+    let spend: U256 = amount - 1
+
+    assume amount > 1 && amount <= INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call approve(spender, MAX_U256)
+    msg { sender: spender }
+    call transferFrom(deployer, recipient, spend)
+    msg { sender: deployer }
+    call allowance(deployer, spender)
+    expect return MAX_U256
+}
+
+// @from: verification-plan INV-TCORE-020; BLS §4.6 SelfBurnTokens; PD §5 V-07
+property "INV-TCORE-020 burn supply delta and third party preservation" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob: address = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol: address = 0x0000000000000000000000000000000000000000000000000000000000000a04
+    let burn_amt: U256 = amount / 2
+
+    assume amount > 1 && amount <= INITIAL_SUPPLY
+    assume burn_amt > 0
+
+    msg { sender: deployer }
+    call constructor()
+    call transfer(bob, amount)
+    call transfer(carol, amount)
+    call balanceOf(carol)
+    expect return amount
+    msg { sender: bob }
+    call burn(burn_amt)
+    call balanceOf(bob)
+    expect return amount - burn_amt
+    msg { sender: deployer }
+    call balanceOf(carol)
+    expect return amount
+    call totalSupply()
+    expect return INITIAL_SUPPLY - burn_amt
+}
+
+// @from: verification-plan PROP-040; BLS §4.6; PD §5 V-07
+property "PROP-040 burn reduces caller balance and supply" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob: address = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call transfer(bob, amount)
+    msg { sender: bob }
+    call burn(amount)
+    call balanceOf(bob)
+    expect return 0
+    call totalSupply()
+    expect return INITIAL_SUPPLY - amount
+}
+
+// @from: verification-plan PROP-041; BLS §4.6; PD §5 V-05/V-07
+property "PROP-041 burn revert on insufficient balance" (amount: U256) for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    assume amount > INITIAL_SUPPLY
+
+    msg { sender: deployer }
+    call constructor()
+    call burn(amount)
+    expect throw 202
+}
+
+// @from: verification-plan PROP-042; BLS §4.6 zero burn; qa-plan U-042
+property "PROP-042 burn zero succeeds" () for TokenCore {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    msg { sender: deployer }
+    call constructor()
+    call burn(0)
+    expect state { m_total_supply: INITIAL_SUPPLY }
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY
+    call totalSupply()
+    expect return INITIAL_SUPPLY
+}

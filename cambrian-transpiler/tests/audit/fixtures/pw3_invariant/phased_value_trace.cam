@@ -1,0 +1,41 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-S-014 row 2 / PW3-G-012: phased value transfer + trace::count parity.
+
+entity ValuePhase {
+    routes {
+        #[factory_only]
+        constructor(recipient: address) => []
+
+        fund(v: U256) => [
+            mark: []
+            send: [
+                ~> m_recipient with { value: v }
+            ]
+        ]
+    }
+
+    m_recipient: address {}
+
+    m_marked: u64 {
+        in constructor(recipient) => 0
+        in fund(v) => mark: m_marked + 1
+    }
+
+    m_paid: U256 {
+        in constructor(recipient) => 0
+        in fund(v) => send: m_paid + v
+    }
+}
+
+invariant "value phase trace" for ValuePhase {
+    init { m_marked: 0, m_paid: 0 }
+
+    action fund(v: U256) {
+        bound v in 1..1000
+    }
+
+    check trace::count(fund) <= trace::length
+    check m_marked >= trace::count(fund)
+}

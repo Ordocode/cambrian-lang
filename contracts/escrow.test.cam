@@ -1,0 +1,66 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+test "constructor initializes state" for Escrow {
+    let buyer = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000003
+    call constructor(buyer, seller, arbiter, 1000, 9999)
+    expect state { m_state: 0, m_funded: false }
+}
+
+test "fund changes state" for Escrow {
+    let buyer = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000003
+    call constructor(buyer, seller, arbiter, 1000, 9999)
+    expect state { m_state: 0 }
+
+    msg { sender: buyer }
+    call fund()
+    expect state { m_state: 1, m_funded: true }
+}
+
+test "fund wrong sender throws" for Escrow {
+    let buyer = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000003
+    call constructor(buyer, seller, arbiter, 1000, 9999)
+
+    msg { sender: arbiter }
+    call fund()
+    expect throw 11
+}
+
+test "release by buyer" for Escrow with {
+    m_buyer: 0x0000000000000000000000000000000000000000000000000000000000000001,
+    m_seller: 0x0000000000000000000000000000000000000000000000000000000000000002,
+    m_state: 1,
+    m_funded: true
+} {
+    let buyer = 0x0000000000000000000000000000000000000000000000000000000000000001
+    msg { sender: buyer }
+    call release()
+    expect state { m_state: 2 }
+}
+
+test "release wrong state throws" for Escrow with {
+    m_buyer: 0x0000000000000000000000000000000000000000000000000000000000000001,
+    m_state: 0
+} {
+    let buyer = 0x0000000000000000000000000000000000000000000000000000000000000001
+    msg { sender: buyer }
+    call release()
+    expect throw 10
+}
+
+test "dispute by party" for Escrow with {
+    m_buyer: 0x0000000000000000000000000000000000000000000000000000000000000001,
+    m_seller: 0x0000000000000000000000000000000000000000000000000000000000000002,
+    m_state: 1
+} {
+    let buyer = 0x0000000000000000000000000000000000000000000000000000000000000001
+    msg { sender: buyer }
+    call dispute()
+    expect state { m_state: 4 }
+}

@@ -1,0 +1,30 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-009 / H-AX-07-03: value-context `if` without `else` is rejected by V48;
+// valid programs must use explicit else — bool pick aligned EVM↔Lean (wave-1 EVM-H9
+// fixed hoisted default for unreachable parse-bypass shapes).
+
+entity IfBoolAlign {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        pick(on: bool) => []
+
+        getFlag() -> bool => [
+            return(m_flag)
+        ]
+    }
+
+    m_flag: bool {
+        in constructor() => false
+        in pick(on) => {
+            if on {
+                true
+            } else {
+                false
+            }
+        }
+    }
+}

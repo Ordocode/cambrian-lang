@@ -1,0 +1,236 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Governor — minimal Cambrian re-expression of OpenZeppelin's Governor.
+// Singleton (no identity). Runs the propose -> vote -> queue -> execute
+// flow against a typed `ERC20Votes` token and `TimelockController`.
+//
+// Idiomatic Cambrian features exercised here:
+//   - Typed cross-contract handles: m_token: Address<ERC20Votes>,
+//     m_timelock: Address<TimelockController>.
+//   - EVM `var` capture: `castVote(...)` reads the caller's current voting
+//     power synchronously from the token contract before tallying it.
+//   - Per-phase `where`: the tally phase only runs if the captured weight
+//     is strictly positive (lifts the OZ "no zero-weight votes" guard
+//     into the language).
+//   - Proposal id via `hashOf(...)` — lowers to keccak256(abi.encode(...))
+//     on EVM, matching the OZ id formula modulo the snapshot field.
+//   - Member-centric tallies: `m_for` / `m_against` are written from the
+//     `tally:` phase of `castVote`, with the captured `weight` in scope.
+//
+// Simplifications vs OZ v5.0.2 (each one cross-referenced in PLAN.md):
+//   - No checkpointed snapshot voting. `castVote(...)` queries the token's
+//     **current** votes, not the past balance at `proposalSnapshot(id)`.
+//     OZ uses `IVotes.getPastVotes(...)` which requires the token to keep
+//     historical checkpoints; Cambrian's ERC20Votes here is intentionally
+//     snapshot-free (see ERC20Votes.cam for the rationale).
+//   - Single-target proposals only; multi-target lists need a dynamic
+//     `address[] targets` parameter which is currently a transpiler gap.
+//   - No `castVoteBySig` (no `ecrecover`).
+//   - `proposalThreshold = 0` (no minimum balance to propose).
+//   - `quorumVotes` is a fixed constructor arg, not a fraction-of-supply
+//     re-evaluated each block.
+//   - `proposalSnapshot` / `proposalDeadline` are wall-clock seconds
+//     (`sys::timestamp + voting_period`), not block numbers.
+//   - `cancel(...)` is gated on the constructor-supplied `m_admin`
+//     instead of OZ's "either proposer or governor" branching. Uses
+//     the now-supported address-member `from m_admin` clause.
+//   - Vote tallying drops the `Abstain` bucket (OZ supports 3 supports:
+//     0=Against / 1=For / 2=Abstain). Abstain rolls into "neither for
+//     nor against" — the proposal can still hit quorum via `m_for`.
+
+enum ProposalState {
+    Pending,
+    Active,
+    Defeated,
+    Succeeded,
+    Queued,
+    Executed,
+    Cancelled
+}
+
+entity Governor {
+
+    routes {
+        #[factory_only]
+        constructor(token:         Address<ERC20Votes>,
+                    timelock:      Address<TimelockController>,
+                    admin:         address,
+                    voting_period: u64,
+                    quorum_votes:  U256) => []
+
+        // OZ `propose(targets, values, calldatas, description)`.
+        // Single-target only here; the proposal id is
+        // hashOf(target, value, data, description_hash). The proposal
+        // immediately becomes `Active` (no `Pending` voting-delay phase
+        // for v1) and stays Active until `m_proposal_deadline[id]`.
+        propose(target:           address,
+                value:            U256,
+                data:             CamData,
+                description_hash: U256) => []
+
+        // OZ `castVote(proposalId, support)`. Two phases:
+        //   read:  pull the caller's current voting power off the token.
+        //   tally: gated on `weight > 0`, increment for / against tallies.
+        //
+        // The `where` lives on the `tally` phase, so the precondition is
+        // checked **after** the cross-contract read but **before** any
+        // tally SSTORE — exactly the desired ordering.
+        castVote(proposal_id: U256, support: u8) => [
+            read: [
+                var weight = getVotes(msg::sender) ~> m_token;
+            ]
+            tally where weight > 0 : throw 100 : [
+            ]
+        ]
+
+        // OZ `queue(...)` schedules the inner call on the timelock.
+        // Authorisation is "any address can call queue once Succeeded";
+        // that mirrors OZ since the timelock itself has its own role
+        // gating. Only Succeeded proposals can be queued (gap: this is
+        // checked against the *recorded* state machine state, not the
+        // computed `state(id)` view).
+        queue(proposal_id:      U256,
+              target:           address,
+              value:            U256,
+              data:             CamData,
+              description_hash: U256)
+            where m_proposal_state[proposal_id] == ProposalState::Succeeded : throw 200
+        => [
+            schedule(target, value, data, 0, proposal_id, m_min_delay) ~> m_timelock
+        ]
+
+        // OZ `execute(...)`. Triggers the timelock, which in turn invokes
+        // `target` with `value` + `data`. The inner reentrancy guard is
+        // provided by the timelock's SSTORE-before-CALL on `m_op_state`.
+        execute(proposal_id:      U256,
+                target:           address,
+                value:            U256,
+                data:             CamData,
+                description_hash: U256)
+            where m_proposal_state[proposal_id] == ProposalState::Queued : throw 300
+        => [
+            execute(target, value, data, 0, proposal_id) ~> m_timelock
+        ]
+
+        // OZ `cancel(...)` — admin-only in v1. Uses the address-member
+        // `from` clause; the explicit `: throw 400` annotation makes the
+        // failed-sender revert match `expect throw 400` test assertions.
+        cancel(proposal_id: U256) from m_admin : throw 400 => []
+
+        // Manual settle: anyone can flip a proposal whose deadline has
+        // elapsed from `Active` to `Succeeded` or `Defeated`. v1 keeps
+        // the state machine member-driven and avoids computing it inside
+        // a `view` route, which would otherwise need `match` over many
+        // members. Calling `settle` is idempotent — a re-call after
+        // `Succeeded` does nothing because the where-clause filters on
+        // `Active`.
+        settle(proposal_id: U256)
+            where m_proposal_state[proposal_id] == ProposalState::Active : throw 500 &&
+                  sys::timestamp >= m_proposal_deadline[proposal_id]     : throw 501
+        => []
+
+        view token()    -> address  => [ return(m_token)    ]
+        view timelock() -> address  => [ return(m_timelock) ]
+        view admin()    -> address  => [ return(m_admin)    ]
+        view quorum()   -> U256     => [ return(m_quorum)   ]
+        view minDelay() -> u64      => [ return(m_min_delay) ]
+
+        view state(id: U256) -> ProposalState => [
+            return(m_proposal_state[id])
+        ]
+
+        view proposalDeadline(id: U256) -> u64 => [
+            return(m_proposal_deadline[id])
+        ]
+
+        view forVotes(id: U256)     -> U256 => [ return(m_for[id])     ]
+        view againstVotes(id: U256) -> U256 => [ return(m_against[id]) ]
+    }
+
+    m_token: Address<ERC20Votes> {
+        in constructor(token, _, _, _, _) => token
+    }
+
+    m_timelock: Address<TimelockController> {
+        in constructor(_, timelock, _, _, _) => timelock
+    }
+
+    m_admin: address {
+        in constructor(_, _, admin, _, _) => admin
+    }
+
+    m_voting_period: u64 {
+        in constructor(_, _, _, voting_period, _) => voting_period
+    }
+
+    m_quorum: U256 {
+        in constructor(_, _, _, _, quorum_votes) => quorum_votes
+    }
+
+    // Min-delay echoed from the timelock at deploy time. Hard-coded to 0
+    // for v1 because reading it would require a constructor-time `var`
+    // capture, which is not part of the grammar yet (constructor `var`
+    // capture would be a separate gap).
+    m_min_delay: u64 {
+        in constructor(_, _, _, _, _) => 0
+    }
+
+    // Proposal lifecycle. Initial state for an unknown id is
+    // `ProposalState::Pending` (the enum's first variant, which is the
+    // default for absent map entries on EVM). A successful `propose(...)`
+    // transitions `Pending -> Active`; `settle(...)` finalises to
+    // `Succeeded` / `Defeated`; `queue(...)` and `execute(...)` advance
+    // through `Queued` and `Executed`; `cancel(...)` is terminal.
+    m_proposal_state: HashMap<U256, ProposalState> {
+        in propose(target, value, data, description_hash) =>
+            m_proposal_state.update(
+                hashOf(target, value, data, description_hash),
+                ProposalState::Active)
+        in queue(proposal_id, _, _, _, _) =>
+            m_proposal_state.update(proposal_id, ProposalState::Queued)
+        in execute(proposal_id, _, _, _, _) =>
+            m_proposal_state.update(proposal_id, ProposalState::Executed)
+        in cancel(proposal_id) =>
+            m_proposal_state.update(proposal_id, ProposalState::Cancelled)
+        in settle(proposal_id) => {
+            if m_for[proposal_id] > m_against[proposal_id] &&
+               m_for[proposal_id] >= m_quorum {
+                m_proposal_state.update(proposal_id, ProposalState::Succeeded)
+            } else {
+                m_proposal_state.update(proposal_id, ProposalState::Defeated)
+            }
+        }
+    }
+
+    m_proposal_deadline: HashMap<U256, u64> {
+        in propose(target, value, data, description_hash) =>
+            m_proposal_deadline.update(
+                hashOf(target, value, data, description_hash),
+                sys::timestamp + m_voting_period)
+    }
+
+    // For-votes tally. Phase-tagged to `tally:` so `weight` (captured in
+    // the `read:` phase) is in scope. `support == 1` matches the OZ
+    // `VoteType.For` value.
+    m_for: HashMap<U256, U256> {
+        in castVote(proposal_id, support) => tally: {
+            if support == 1 {
+                m_for.update(proposal_id, m_for[proposal_id] + weight)
+            } else {
+                m_for
+            }
+        }
+    }
+
+    // Against-votes tally. `support == 0` matches OZ `VoteType.Against`.
+    m_against: HashMap<U256, U256> {
+        in castVote(proposal_id, support) => tally: {
+            if support == 0 {
+                m_against.update(proposal_id, m_against[proposal_id] + weight)
+            } else {
+                m_against
+            }
+        }
+    }
+}

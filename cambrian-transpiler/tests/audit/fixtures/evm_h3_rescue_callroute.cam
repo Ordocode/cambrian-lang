@@ -1,0 +1,33 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H3: if `rescue` wrapped an internal `call`, recover
+// must run when the callee reverts. The surface syntax forbids this shape;
+// the audit harness injects `Rescue { CallRoute }` before codegen (see
+// test_audit_evm.rs).
+
+entity Guard {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        invokeWithRescue(amount: u64) => [
+            call failingHelper(amount)
+        ]
+
+        private failingHelper(amount: u64)
+            where amount < 500 : throw 2
+        => []
+
+        recover call_failed(body: CamData) => []
+
+        getRecoverCount() -> u64 => [
+            return(m_recover_count)
+        ]
+    }
+
+    m_recover_count: u64 {
+        in constructor() => 0
+        in recover_call_failed(_) => m_recover_count + 1
+    }
+}

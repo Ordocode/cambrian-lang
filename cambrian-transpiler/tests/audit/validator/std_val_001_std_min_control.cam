@@ -1,0 +1,12 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Control: explicit std::math::min must not trigger V49.
+
+entity StdMinControl {
+    routes {
+        go(a: u64, b: u64) -> u64 => [ return(std::math::min(a, b)) ]
+    }
+
+    m_x: u64 {}
+}

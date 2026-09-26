@@ -1,0 +1,18 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Multi-entity invariant (Factory-owned): same two contracts, factory
+// ordering first so this lands in `UniswapV2FactorySpec.lean`. Minting on
+// the token grows its supply, but the factory's pair registry stays empty
+// because `createPair` is never driven — a cross-entity check mixing a
+// monotone token surface with an untouched factory surface.
+invariant "factory registry empty under token mints" for { fac: UniswapV2Factory, tok: ERC20 } {
+    init tok { m_token_id: 2, m_total_supply: 100 }
+
+    action fac.setFeeToSetter(new_setter: address) { }
+    action tok.mint(to: address, amount: U256) { }
+    action tok.transfer(to: address, amount: U256) { }
+
+    check fac.m_all_pairs.len() == 0
+    check tok.m_total_supply >= 100
+}

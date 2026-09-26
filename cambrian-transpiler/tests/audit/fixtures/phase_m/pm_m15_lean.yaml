@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pm-m15-lean
+target: lean
+output_dir: build/
+deterministic_addresses: true
+sources:
+  - pm_m15_let_send.cam

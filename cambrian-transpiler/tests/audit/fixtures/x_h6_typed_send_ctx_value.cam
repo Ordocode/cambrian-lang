@@ -1,0 +1,40 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-006 EVM ground truth: typed send with `{ value }` via stored `m_payee`.
+// Lean inspect uses lean_h4_typed_send_value.cam (`Payee.address` route).
+
+entity Payee {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        accept deposit() => []
+        getSpent() -> u128 => [ return(m_spent) ]
+    }
+
+    m_spent: u128 {
+        in constructor() => 0
+        in deposit() => m_spent + msg::value as u128
+    }
+}
+
+entity Payer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor(payee: Address<Payee>) => []
+
+        pay(amount: u128) => [
+            deposit() ~> m_payee with { value: amount }
+        ]
+    }
+
+    m_payee: Address<Payee> {
+        in constructor(payee) => payee
+    }
+
+    m_x: u128 {}
+}

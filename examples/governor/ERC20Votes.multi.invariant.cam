@@ -1,0 +1,20 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Multi-entity invariant (ERC20Votes-owned): same two contracts, owner
+// ordering flipped so this lands in `ERC20VotesSpec.lean` and exercises
+// the other multi-entity emit ordering. Token supply is monotonic under
+// mint-only activity (no burn action here) while the Governor's quorum
+// stays fixed — a cross-entity monotonicity + config-immutability check.
+invariant "supply monotonic quorum fixed" for { tok: ERC20Votes, g: Governor } {
+    init tok { m_total_supply: 1000 }
+    init g { m_quorum: 500 }
+
+    action tok.mint(to: address, amount: U256) { }
+    action tok.transfer(to: address, amount: U256) { }
+    action g.propose(target: address, value: U256, data: CamData,
+                     description_hash: U256) { }
+
+    check tok.m_total_supply >= 1000
+    check g.m_quorum == 500
+}

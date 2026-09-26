@@ -1,0 +1,33 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+test "constructor sets balance" for IdentityVault with { m_id: 42 } {
+    call constructor(100)
+    expect state { m_balance: 100 }
+}
+
+test "deposit increases balance" for IdentityVault with { m_id: 42, m_balance: 50 } {
+    call deposit(30)
+    expect state { m_balance: 80 }
+}
+
+test "getId returns identity" for IdentityVault with { m_id: 42 } {
+    call getId()
+    expect return 42
+}
+
+test "getBalance returns current balance" for IdentityVault with { m_id: 1, m_balance: 999 } {
+    call getBalance()
+    expect return 999
+}
+
+test "multi-step deposit" for IdentityVault with { m_id: 7 } {
+    call constructor(10)
+    expect state { m_balance: 10 }
+
+    call deposit(5)
+    expect state { m_balance: 15 }
+
+    call deposit(25)
+    expect state { m_balance: 40 }
+}

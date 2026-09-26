@@ -1,0 +1,42 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-015 / H-AX-01-04: `msg::sender` in deployed entity init transform —
+// EVM det sees CambrianFactory at Child ctor; Lean uses caller route ctx.
+
+entity ChildOwner {
+    routes {
+        #[factory_only]
+        init setup() => []
+
+        getOwner() -> address => [
+            return(m_owner)
+        ]
+    }
+
+    m_owner: address {
+        in setup() => msg::sender
+    }
+}
+
+entity ParentSpawner {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init setup() => []
+
+        spawn() => [
+            deploy ChildOwner()
+        ]
+
+        getSpawns() -> u64 => [
+            return(m_spawns)
+        ]
+    }
+
+    m_spawns: u64 {
+        in setup() => 0
+        in spawn() => m_spawns + 1
+    }
+}

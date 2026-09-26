@@ -1,0 +1,107 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Stateful invariants for the uRWA accounting layer.
+//
+// A property witnesses one call. These say something about every reachable
+// sequence, which is where the accounting defects live: a route that balances
+// on its own but drifts against its neighbours over a trace.
+//
+// Both invariants confine the fuzzed addresses with `bound` rather than
+// `assume`. An `assume` that a drawn address equals a literal is satisfied
+// about once in 2^160 draws, so the harness discards every call, the run
+// reports green, and nothing was tested. `bound` maps the draw into the
+// range instead of rejecting it.
+//
+// The operator and the drawn senders overlap on purpose: `0x…a01` both holds
+// the key and appears in `senders`, so the operator-only routes are reachable
+// and their aliasing cases — the operator seizing from or to itself — are in
+// the trace set.
+
+// P0-11. The invariant that caught the `ERC20.cam` self-transfer defect, and
+// the reason the aliasing guards in `m_balances` exist at all.
+//
+// `totalSupply` alone stays balanced through that defect — the emission is
+// never touched — so an invariant written against it is green while the token
+// mints. Summing the balances is what makes the credit-overwrites-the-debit
+// case observable. Remove any one of the three `if to == …` guards and a
+// trace that transfers to self falsifies this within a handful of calls.
+invariant "the balances sum to the emission" for ERC7943 {
+    init { m_operator: 0x0000000000000000000000000000000000000000000000000000000000000a01 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action transfer(to: address, amount: U256) {
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action transferFrom(from_addr: address, to: address, amount: U256) {
+        bound from_addr in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action forcedTransfer(from_addr: address, to: address, amount: U256) {
+        bound from_addr in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action approve(spender: address, amount: U256) { }
+    action mint(to: address, amount: U256) {
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action burn(amount: U256) { }
+    action setFrozenTokens(account: address, amount: U256) {
+        bound account in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action setSendBlocked(account: address, blocked: bool) {
+        bound account in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action setReceiveBlocked(account: address, blocked: bool) {
+        bound account in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    check balanceOf(0x0000000000000000000000000000000000000000000000000000000000000a01) +
+          balanceOf(0x0000000000000000000000000000000000000000000000000000000000000a02) ==
+          totalSupply()
+}
+
+// P1-1, stated as the definition rather than as a bound.
+//
+// `holderCount` is maintained by five routes, each reading the balances
+// *before* the balance transform writes them. That is five chances to count a
+// move twice, miss an account emptying, or credit a top-up as a new holder —
+// and every one of them is a single-call error that a unit test with fixed
+// amounts can miss while a trace that mints, tops up, drains and re-funds the
+// same two addresses cannot.
+//
+// The address set is two, so the right-hand side is spelled out rather than
+// summed. Widening it would mean adding a term here as well as a bound above.
+invariant "the holder count is the number of nonzero balances" for ERC7943 {
+    init { m_operator: 0x0000000000000000000000000000000000000000000000000000000000000a01 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action transfer(to: address, amount: U256) {
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action transferFrom(from_addr: address, to: address, amount: U256) {
+        bound from_addr in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action forcedTransfer(from_addr: address, to: address, amount: U256) {
+        bound from_addr in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action approve(spender: address, amount: U256) { }
+    action mint(to: address, amount: U256) {
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action burn(amount: U256) { }
+
+    check holderCount() ==
+          counts_as_holder(balanceOf(0x0000000000000000000000000000000000000000000000000000000000000a01)) +
+          counts_as_holder(balanceOf(0x0000000000000000000000000000000000000000000000000000000000000a02))
+}

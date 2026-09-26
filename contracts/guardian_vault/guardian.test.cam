@@ -1,0 +1,37 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Guardian — pings Vaults via AddressOf
+
+test "constructor initializes pings to 0" for Guardian with { m_id: 1 } {
+    registry Vault { code_hash: 0x657a790b04505eb78f128a09debcbe1130e112f122499d9677d29d93f7dc0b3e, code_depth: 44, wasm_hash: 0x07795a45d2a4392450af31efe627a77c4dac79edb72fa17c4513d23d6138d095 }
+    call constructor()
+    expect state { m_pings_sent: 0 }
+}
+
+test "ping increments sent counter" for Guardian with { m_id: 42 } {
+    registry Vault { code_hash: 0x657a790b04505eb78f128a09debcbe1130e112f122499d9677d29d93f7dc0b3e, code_depth: 44, wasm_hash: 0x07795a45d2a4392450af31efe627a77c4dac79edb72fa17c4513d23d6138d095 }
+    call constructor()
+
+    call ping(100)
+    expect state { m_pings_sent: 1 }
+
+    call ping(200)
+    expect state { m_pings_sent: 2 }
+
+    call ping(300)
+    expect state { m_pings_sent: 3 }
+}
+
+test "getPings returns sent count" for Guardian with { m_id: 7 } {
+    registry Vault { code_hash: 0x657a790b04505eb78f128a09debcbe1130e112f122499d9677d29d93f7dc0b3e, code_depth: 44, wasm_hash: 0x07795a45d2a4392450af31efe627a77c4dac79edb72fa17c4513d23d6138d095 }
+    call constructor()
+
+    call getPings()
+    expect return 0
+
+    call ping(1)
+    call ping(2)
+    call getPings()
+    expect return 2
+}

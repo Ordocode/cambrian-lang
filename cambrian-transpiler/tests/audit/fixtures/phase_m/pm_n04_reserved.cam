@@ -1,0 +1,15 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-STD-N-001 / PM-008 (MA-N04): reserved route param `__cbr_v` must be
+// rejected in single-file CLI mode as well as project mode.
+
+entity B {
+    m_x: u64 {
+        in bump(__cbr_v) => m_x + __cbr_v
+    }
+
+    routes {
+        bump(__cbr_v: u64) => []
+    }
+}

@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity Locker {
+
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        acceptPing()
+            from Guardian(m_id)
+            => []
+        getPingCount() -> u64 => [
+            return(m_ping_count)
+        ]
+    }
+
+    m_ping_count: u64 {
+        in constructor() => 0
+        in acceptPing() => m_ping_count + 1
+    }
+}

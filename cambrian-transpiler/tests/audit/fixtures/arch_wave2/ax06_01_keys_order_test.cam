@@ -1,0 +1,9 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+test "first inserted key wins on evm" for KeyOrderProbe {
+    call put(1, 10)
+    call put(2, 20)
+    call firstKey()
+    expect return 1
+}

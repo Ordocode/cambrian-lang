@@ -1,0 +1,32 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Invariant: a freshly-deployed `UniswapV2Pair` reports the
+// expected `token0()` / `token1()` regardless of how the random
+// fuzzer drives `mint` / `burn`. Both routes preserve `m_token0` /
+// `m_token1` (only reserves and balances mutate), so the assertion
+// is conservation-shaped — a regression that ever overwrote either
+// identity slot would be caught here.
+//
+// G-U9: this fixture exists *because* identity-member seeding finally
+// works through `with { ... }`. The two token addresses are constants
+// of the invariant; without seeding, every test instance would deploy
+// with `m_token0 == m_token1 == address(0)` and the assertion would
+// trivially pass even on a buggy implementation.
+
+invariant "Pair preserves identity tokens" for UniswapV2Pair {
+    with {
+        m_token0: 0x000000000000000000000000000000000000000000000000000000000000beef,
+        m_token1: 0x000000000000000000000000000000000000000000000000000000000000cafe
+    }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000d01
+    }
+
+    action mint(to: address) { }
+    action burn(to: address) { }
+
+    check token0() == 0x000000000000000000000000000000000000000000000000000000000000beef
+    check token1() == 0x000000000000000000000000000000000000000000000000000000000000cafe
+}

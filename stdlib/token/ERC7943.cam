@@ -1,0 +1,425 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// ERC7943 — the uRWA accounting layer: the rule routes over a checked base.
+//
+// This entity is the executable form of `product/stdlib/bls/erc7943.md`. It
+// carries everything `ERC7943Min` carries and adds the claims that need the
+// base's arithmetic pinned down: a balance splits exactly into a frozen part
+// and an unfrozen part, a seizure moves exactly `amount`, the balances sum to
+// the emission, and the holder count is exactly the number of nonzero
+// balances.
+//
+// ## Why this is a second entity rather than a flag on the first
+//
+// The split is about what an adopter may rely on, and the two claims survive
+// different bases. `ERC7943Min` says a frozen holder cannot transfer — a
+// statement about control flow, true over a rebasing or fee-charging base.
+// This entity says the unfrozen amount plus the frozen amount is the balance,
+// which a rebase falsifies the moment it moves a balance without touching the
+// freeze. Folding both into one entity behind a configuration flag would mean
+// the weaker claim ships with the stronger one's assumptions attached, and an
+// integrator over an elastic base would inherit arithmetic that is false for
+// them with nothing to read that says so. §7 of the BLS is the check set an
+// adopter runs against their base before claiming this document.
+//
+// ## What it adds over `ERC7943Min`
+//
+//   - A full ERC-20 base rather than a minimal one: metadata views and
+//     EIP-2612 permit, because the BLS puts this entity over a base that
+//     claims the `erc20` document and that document names both.
+//   - `holderCount`, maintained by every route that can zero or unzero a
+//     balance.
+//   - The frozen amount is lowered to the new balance when a seizure reaches
+//     into it. Without that one line P0-2 breaks the first time an operator
+//     confiscates frozen value, and every later freeze computation is wrong.
+//
+// ## One key, as in `ERC7943Min`
+//
+// `erc20` names a minter and ERC-7943 names an operator, and this entity
+// merges them into `m_operator`. Two members read better on paper —
+// issuance and enforcement are different acts — but they would make the two
+// uRWA entities disagree about their own key model, so an integrator moving
+// from the permission layer to this one would have to rewrite their
+// deployment rather than swap a name. P1-2 of the `erc20` document holds with
+// "minter" read as "operator". An adopter who wants the issuer and the
+// compliance officer on separate keys puts a splitter at the operator
+// address; an adopter who does not cannot get the single key back once the
+// entity has forked it in two.
+//
+// ## Throw codes
+//
+//   1  zero amount
+//   2  insufficient balance (`forcedTransfer` only — see `ERC7943Min.cam`)
+//   3  insufficient allowance
+//   4  permit deadline passed
+//   5  permit signature does not match owner
+//   6  caller is not the operator
+//   7  zero address as transfer recipient, approval spender or permit owner
+//   8  the sender check rejects the sender
+//   9  the recipient check rejects the recipient
+//  10  the amount is above the unfrozen amount of the sender
+//
+// ## Deviations worth knowing before adoption
+//
+// The same as `ERC7943Min`: a zero-value transfer reverts, inherited from the
+// ERC-20 base. Read that header for what it costs.
+
+import "./erc7943-core.cam"
+
+entity ERC7943 {
+
+    // ERC-7943 requires both. A freeze or a seizure that emits nothing is
+    // invisible to every indexer, so the regulatory audit trail this entity
+    // exists to produce would live only in storage — and a compliance record
+    // that cannot be read off-chain is not a record.
+    event ForcedTransfer(indexed from_addr: address, indexed to: address, amount: U256);
+    event Frozen(indexed account: address, amount: U256);
+
+    // The base is an ERC-20, so it owes the ERC-20 log as well.
+    event Transfer(indexed from_addr: address, indexed to: address, value: U256);
+    event Approval(indexed owner: address, indexed spender: address, value: U256);
+
+    routes {
+        #[factory_only]
+        constructor(name_: String, symbol_: String, decimals_: u8,
+                    operator_: address,
+                    initial_holder: address, initial_supply: U256) => []
+
+        // ── The base token ──────────────────────────────────────────────
+
+        transfer(to: address, amount: U256) -> bool
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  send_allowed(m_send_blocked, msg::sender) : throw 8 &&
+                  receive_allowed(m_recv_blocked, to) : throw 9 &&
+                  amount <= unfrozen_of(m_frozen, m_balances, msg::sender) : throw 10
+        => [
+            emit Transfer(msg::sender, to, amount);
+            return(true)
+        ]
+
+        transferFrom(from_addr: address, to: address, amount: U256) -> bool
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  send_allowed(m_send_blocked, from_addr) : throw 8 &&
+                  receive_allowed(m_recv_blocked, to) : throw 9 &&
+                  amount <= unfrozen_of(m_frozen, m_balances, from_addr) : throw 10 &&
+                  allowance_of(m_allowances, from_addr, msg::sender) >= amount : throw 3
+        => [
+            emit Transfer(from_addr, to, amount);
+            return(true)
+        ]
+
+        approve(spender: address, amount: U256) -> bool
+            where spender != zero_address() : throw 7
+        => [
+            emit Approval(msg::sender, spender, amount);
+            return(true)
+        ]
+
+        permit(owner: address, spender: address, value: U256,
+               deadline: U256, v: u8, r: bytes32, s: bytes32)
+            where deadline >= sys::timestamp : throw 4 &&
+                  owner != zero_address() : throw 7 &&
+                  spender != zero_address() : throw 7 &&
+                  permit_signer(
+                      domain_separator(m_hashed_name, m_hashed_version,
+                                       sys::chainid, sys::address),
+                      permit_struct_hash(owner, spender, value,
+                                         nonce_of(m_nonces, owner), deadline),
+                      v, r, s) == owner : throw 5
+        => [ emit Approval(owner, spender, value); ]
+
+        mint(to: address, amount: U256)
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  msg::sender == m_operator : throw 6 &&
+                  receive_allowed(m_recv_blocked, to) : throw 9
+        => [ emit Transfer(zero_address(), to, amount); ]
+
+        burn(amount: U256)
+            where amount > 0 : throw 1 &&
+                  send_allowed(m_send_blocked, msg::sender) : throw 8 &&
+                  amount <= unfrozen_of(m_frozen, m_balances, msg::sender) : throw 10
+        => [ emit Transfer(msg::sender, zero_address(), amount); ]
+
+        // ── The rule routes ─────────────────────────────────────────────
+
+        forcedTransfer(from_addr: address, to: address, amount: U256) -> bool
+            where msg::sender == m_operator : throw 6 &&
+                  amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  balance_of(m_balances, from_addr) >= amount : throw 2
+        => [
+            emit ForcedTransfer(from_addr, to, amount);
+            emit Transfer(from_addr, to, amount);
+            return(true)
+        ]
+
+        setFrozenTokens(account: address, amount: U256) -> bool
+            where msg::sender == m_operator : throw 6
+        => [
+            emit Frozen(account, amount);
+            return(true)
+        ]
+
+        setSendBlocked(account: address, blocked: bool)
+            where msg::sender == m_operator : throw 6
+        => []
+
+        setReceiveBlocked(account: address, blocked: bool)
+            where msg::sender == m_operator : throw 6
+        => []
+
+        // ── The checks ──────────────────────────────────────────────────
+
+        // ERC-165. `0x01ffc9a7` is the introspection interface itself;
+        // `0x3edbb4c4` is the ERC-7943 fungible interface — the XOR of the
+        // selectors of `forcedTransfer`, `setFrozenTokens`, `canSend`,
+        // `canReceive`, `getFrozenTokens` and `canTransfer`, which is the
+        // value the EIP states and which this entity's six routes reproduce
+        // exactly. Answering `true` here is a claim about the ABI, so it stays
+        // honest only while those six signatures do: change an argument list
+        // and the claim becomes a lie the caller has no way to detect.
+        //
+        // The parameter is `bytes4` and nothing else. A `u32` or a `bytes32`
+        // in this position yields a different selector, so a caller making the
+        // standard `supportsInterface(0x01ffc9a7)` staticcall reaches no
+        // function at all and reads the failure as "not supported".
+        view supportsInterface(interface_id: bytes4) -> bool => [
+            return(interface_id == 0x01ffc9a7 || interface_id == 0x3edbb4c4)
+        ]
+
+        view canSend(account: address) -> bool => [
+            return(send_allowed(m_send_blocked, account))
+        ]
+
+        view canReceive(account: address) -> bool => [
+            return(receive_allowed(m_recv_blocked, account))
+        ]
+
+        view canTransfer(from_addr: address, to: address, amount: U256) -> bool => [
+            return(transfer_allowed(m_send_blocked, m_recv_blocked,
+                                    m_frozen, m_balances,
+                                    from_addr, to, amount))
+        ]
+
+        view getFrozenTokens(account: address) -> U256 => [
+            return(frozen_of(m_frozen, account))
+        ]
+
+        view unfrozenTokens(account: address) -> U256 => [
+            return(unfrozen_of(m_frozen, m_balances, account))
+        ]
+
+        // The count of addresses holding a nonzero balance.
+        //
+        // Not part of ERC-7943's interface. It is here because a compliance
+        // report asks how many holders a security has far more often than it
+        // asks any question the standard answers, and computing it off-chain
+        // means replaying every transfer since deployment.
+        view holderCount() -> U256 => [ return(m_holders) ]
+
+        // ── The base views ──────────────────────────────────────────────
+
+        view name() -> String => [ return(m_name) ]
+        view symbol() -> String => [ return(m_symbol) ]
+        view decimals() -> u8 => [ return(m_decimals) ]
+        view operator() -> address => [ return(m_operator) ]
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        view allowance(owner: address, spender: address) -> U256 => [
+            return(allowance_of(m_allowances, owner, spender))
+        ]
+
+        view totalSupply() -> U256 => [ return(m_total_supply) ]
+
+        view nonces(owner: address) -> U256 => [
+            return(nonce_of(m_nonces, owner))
+        ]
+
+        view DOMAIN_SEPARATOR() -> bytes32 => [
+            return(domain_separator(m_hashed_name, m_hashed_version,
+                                    sys::chainid, sys::address))
+        ]
+    }
+
+    m_name: String { in constructor(name_, _, _, _, _, _) => name_ }
+    m_symbol: String { in constructor(_, symbol_, _, _, _, _) => symbol_ }
+    m_decimals: u8 { in constructor(_, _, decimals_, _, _, _) => decimals_ }
+    m_operator: address { in constructor(_, _, _, operator_, _, _) => operator_ }
+
+    m_hashed_name: U256 {
+        in constructor(name_, _, _, _, _, _) => evm::keccak256Packed(name_)
+    }
+    m_hashed_version: U256 {
+        in constructor(_, _, _, _, _, _) => evm::keccak256Packed(b"1")
+    }
+
+    m_total_supply: U256 {
+        in constructor(_, _, _, _, _, initial_supply) => initial_supply
+        in mint(_, amount) => m_total_supply + amount
+        in burn(amount)    => m_total_supply - amount
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(_, _, _, _, initial_holder, initial_supply) => {
+            {}.insert(initial_holder, initial_supply)
+        }
+        // The self-alias guard: both balances are read before either is
+        // written, so without it a transfer to oneself lets the credit
+        // overwrite the debit and the account gains `amount` out of nothing.
+        // `ERC20.cam` shipped that defect; a stateful invariant found it.
+        in transfer(to, amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            let bal_to   = balance_of(m_balances, to);
+            if to == msg::sender { m_balances } else {
+                m_balances
+                    .update(msg::sender, bal_from - amount)
+                    .update(to,          bal_to   + amount)
+            }
+        }
+        in transferFrom(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            if to == from_addr { m_balances } else {
+                m_balances
+                    .update(from_addr, bal_from - amount)
+                    .update(to,        bal_to   + amount)
+            }
+        }
+        in forcedTransfer(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            if to == from_addr { m_balances } else {
+                m_balances
+                    .update(from_addr, bal_from - amount)
+                    .update(to,        bal_to   + amount)
+            }
+        }
+        in mint(to, amount) => {
+            let bal_to = balance_of(m_balances, to);
+            m_balances.update(to, bal_to + amount)
+        }
+        in burn(amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            m_balances.update(msg::sender, bal_from - amount)
+        }
+    }
+
+    m_allowances: HashMap<U256, U256> {
+        in approve(spender, amount) => {
+            m_allowances.update(hashOf(msg::sender, spender), amount)
+        }
+        in transferFrom(from_addr, _, amount) => {
+            let key  = hashOf(from_addr, msg::sender);
+            let prev = allowance_of(m_allowances, from_addr, msg::sender);
+            m_allowances.update(key, allowance_after_spend(prev, amount))
+        }
+        in permit(owner, spender, value, _, _, _, _) => {
+            m_allowances.update(hashOf(owner, spender), value)
+        }
+    }
+
+
+    m_nonces: HashMap<address, U256> {
+        in permit(owner, _, _, _, _, _, _) => {
+            let prev = nonce_of(m_nonces, owner);
+            m_nonces.update(owner, prev + 1)
+        }
+    }
+
+    m_frozen: HashMap<address, U256> {
+        in setFrozenTokens(account, amount) => {
+            m_frozen.update(account, amount)
+        }
+        // The one line that keeps P0-2 true through the route allowed to
+        // break the freeze policy.
+        //
+        // A seizure may reach into the frozen part — that is what a
+        // court-ordered clawback is. If it did so and left the frozen amount
+        // where it was, the account would be left claiming to withhold more
+        // than it holds, and every later `unfrozenTokens` would saturate at
+        // zero for an account with a spendable balance. Lowering the freeze to
+        // the balance that remains is the only assignment that keeps
+        // `unfrozen + frozen == balance` through the route.
+        //
+        // Below the unfrozen amount this is a no-op — `amount <= bal - frz`
+        // gives `frz <= bal - amount` — so S04 keeps the freeze constant
+        // without a second branch, and S05 gets its clamp from the same line.
+        in forcedTransfer(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let frz      = frozen_of(m_frozen, from_addr);
+            if to == from_addr { m_frozen } else {
+                let remaining = bal_from - amount;
+                if frz > remaining {
+                    m_frozen.update(from_addr, remaining)
+                } else {
+                    m_frozen
+                }
+            }
+        }
+    }
+
+    m_send_blocked: HashMap<address, bool> {
+        in setSendBlocked(account, blocked) => {
+            m_send_blocked.update(account, blocked)
+        }
+    }
+
+    m_recv_blocked: HashMap<address, bool> {
+        in setReceiveBlocked(account, blocked) => {
+            m_recv_blocked.update(account, blocked)
+        }
+    }
+
+    // The holder count, maintained rather than derived.
+    //
+    // Every route that can take a balance to zero or off zero adjusts it, and
+    // each adjustment reads the balances *before* the transform above runs —
+    // member transforms all see the pre-call state, which is what makes
+    // "`bal_from == amount`" the test for "this account is about to empty".
+    //
+    // The move arithmetic is `holders_after_move` in `erc7943-core.cam`.
+    m_holders: U256 {
+        in constructor(_, _, _, _, _, initial_supply) => {
+            if initial_supply > 0 { 1 } else { 0 }
+        }
+        in transfer(to, amount) => {
+            if to == msg::sender { m_holders } else {
+                holders_after_move(m_holders,
+                                   balance_of(m_balances, msg::sender),
+                                   balance_of(m_balances, to),
+                                   amount)
+            }
+        }
+        in transferFrom(from_addr, to, amount) => {
+            if to == from_addr { m_holders } else {
+                holders_after_move(m_holders,
+                                   balance_of(m_balances, from_addr),
+                                   balance_of(m_balances, to),
+                                   amount)
+            }
+        }
+        in forcedTransfer(from_addr, to, amount) => {
+            if to == from_addr { m_holders } else {
+                holders_after_move(m_holders,
+                                   balance_of(m_balances, from_addr),
+                                   balance_of(m_balances, to),
+                                   amount)
+            }
+        }
+        in mint(to, amount) => {
+            let bal_to = balance_of(m_balances, to);
+            if bal_to == 0 { m_holders + 1 } else { m_holders }
+        }
+        in burn(amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            if bal_from == amount { m_holders - 1 } else { m_holders }
+        }
+    }
+}

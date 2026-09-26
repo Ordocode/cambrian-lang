@@ -1,0 +1,36 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H13: two deploys of the same entity in one route
+// reuse the `_deployed_<entity>` local name.
+
+entity Vault {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+    }
+
+    m_placeholder: u64 {
+        in constructor() => 0
+    }
+}
+
+entity Deployer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        spawnPair(first: u64, second: u64) => [
+            deploy Vault(first)
+            deploy Vault(second)
+        ]
+    }
+
+    m_spawns: u64 {
+        in constructor() => 0
+        in spawnPair(_, _) => m_spawns + 2
+    }
+}

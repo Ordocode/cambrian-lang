@@ -1,0 +1,164 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// erc4626-core — the asset interface and the conversion arithmetic shared by
+// the two standard-library vaults.
+//
+// Importable (F4-clean: no entity, test, fuzz or invariant here). `extern
+// entity` is a declaration of somebody else's ABI, not a contract this file
+// deploys, so it belongs on the importable side.
+//
+// The two vaults differ in exactly one thing: which pair of conversion
+// functions they call. `ERC4626Min.cam` calls the `ratio_*` family, which is
+// the textbook proportional rule with a branch for the empty vault.
+// `ERC4626.cam` calls the `offset_*` family, which is the same rule computed
+// against a share supply and an asset total that each carry a virtual
+// addend. Everything else — the route set, the guards, the allowance
+// handling, the share ledger — is the same text in both, which is why the
+// split is here and not two copies of a vault.
+
+import "../token/erc20-core.cam"
+import "../math.cam"
+
+// ── The asset ────────────────────────────────────────────────────────
+//
+// The three routes a vault actually reaches on the token it holds. Declared
+// as an `extern entity` rather than typing the member `Address<ERC20>`
+// because a vault is pointed at whatever token the deployer names, and that
+// token is not compiled into this project. The typed member is what makes
+// `balanceOf(sys::address) ~> m_asset` lower to an external call at all — a
+// plain `address` has no interface to call through.
+//
+// `transfer` and `transferFrom` are declared returning `bool` because that is
+// what ERC-20 says and what a conforming token returns; a call that decodes
+// nothing from a token that returns a word is a revert on some compilers and
+// silence on others. Tokens that return no value at all (the well-known
+// pre-ERC-20 offenders) are out of scope for these vaults, and §6 of both
+// BLS documents says so.
+extern entity VaultAsset {
+    view route balanceOf(owner: address) -> U256;
+    route transfer(to: address, amount: U256) -> bool;
+    route transferFrom(from_addr: address, to: address, amount: U256) -> bool;
+}
+
+// ── Share-allowance helpers ──────────────────────────────────────────
+
+// Whether `spender` may burn `shares` of `owner`'s stake.
+//
+// The owner is always allowed to burn their own, which is why this is not
+// simply a comparison: ERC-4626's `withdraw`/`redeem` take an `owner`
+// parameter, and the overwhelmingly common call has `owner == msg::sender`
+// and no allowance at all. A vault that required a self-approval there would
+// be unusable through every published router.
+pure fn share_spend_allowed(allowances: HashMap<U256, U256>,
+                            owner: address, spender: address,
+                            shares: U256) -> bool {
+    if owner == spender { true } else {
+        allowance_of(allowances, owner, spender) >= shares
+    }
+}
+
+// The `owner → spender` share allowance after `spender` burns `shares`.
+//
+// Unchanged when the owner is spending their own stake — there was no
+// allowance in play — and unchanged at the infinite sentinel, matching the
+// base token.
+pure fn share_allowance_after_burn(allowances: HashMap<U256, U256>,
+                                   owner: address, spender: address,
+                                   shares: U256) -> U256 {
+    let prev = allowance_of(allowances, owner, spender);
+    if owner == spender { prev } else { allowance_after_spend(prev, shares) }
+}
+
+// ── The proportional rule, with the empty-vault branch (`erc4626-min`) ──
+//
+// `shares = assets · supply / total`, and its three siblings. The two
+// degenerate cases both mean "no exchange rate has been established yet", and
+// both answer one share per asset:
+//
+//   - `supply == 0` — nobody holds a share, so any rate is as good as any
+//     other and one-to-one is the conventional choice.
+//   - `total == 0` with `supply > 0` — the vault holds shares against nothing.
+//     Unreachable through the routes of this vault, but an elastic asset can
+//     produce it from outside, and without the branch the division traps and
+//     every route on the vault is bricked.
+//
+// The branch is exactly what `ERC4626.cam` exists to remove, and the reason
+// is not that it is ugly: it is a state the vault occupies once, that no
+// ordinary test walks through, and against which the first depositor sets the
+// rate for everyone after them. See the rationale in `stdlib/bls/erc4626.md`.
+
+pure fn ratio_shares_down(assets: U256, supply: U256, total: U256) -> U256 {
+    if supply == 0 { assets } else {
+        if total == 0 { assets } else { mul_div(assets, supply, total) }
+    }
+}
+
+pure fn ratio_shares_up(assets: U256, supply: U256, total: U256) -> U256 {
+    if supply == 0 { assets } else {
+        if total == 0 { assets } else { mul_div_up(assets, supply, total) }
+    }
+}
+
+pure fn ratio_assets_down(shares: U256, supply: U256, total: U256) -> U256 {
+    if supply == 0 { shares } else { mul_div(shares, total, supply) }
+}
+
+pure fn ratio_assets_up(shares: U256, supply: U256, total: U256) -> U256 {
+    if supply == 0 { shares } else { mul_div_up(shares, total, supply) }
+}
+
+// ── The proportional rule with virtual amounts (`erc4626`) ───────────
+//
+// The same four conversions against `supply + vshares` and `total + 1`.
+//
+// Three things follow from the two addends, and all three are why this family
+// replaces the one above rather than sitting beside it as an option:
+//
+//   - **No branch.** `supply + vshares >= vshares >= 1` and `total + 1 >= 1`,
+//     so neither denominator is ever zero and there is no empty-vault case to
+//     state separately. One expression, valid on the first deposit and the
+//     millionth.
+//   - **Total.** Nothing is subtracted and no divisor can vanish, so under
+//     `lean.numerics: nat` these are total functions and a proof about them
+//     needs no side conditions.
+//   - **The donation attack costs money.** A direct transfer into the vault is
+//     divided among `supply + vshares` shares, and the attacker holds at most
+//     `supply` of them. The rest is diluted into holders who do not exist and
+//     cannot redeem. `stdlib/bls/erc4626.md` §7 states the resulting bound;
+//     it is a price, not a prohibition.
+
+pure fn offset_shares_down(assets: U256, supply: U256,
+                           vshares: U256, total: U256) -> U256 {
+    mul_div(assets, supply + vshares, total + 1)
+}
+
+pure fn offset_shares_up(assets: U256, supply: U256,
+                         vshares: U256, total: U256) -> U256 {
+    mul_div_up(assets, supply + vshares, total + 1)
+}
+
+pure fn offset_assets_down(shares: U256, supply: U256,
+                           vshares: U256, total: U256) -> U256 {
+    mul_div(shares, total + 1, supply + vshares)
+}
+
+pure fn offset_assets_up(shares: U256, supply: U256,
+                         vshares: U256, total: U256) -> U256 {
+    mul_div_up(shares, total + 1, supply + vshares)
+}
+
+// The smallest virtual share amount `ERC4626.cam`'s constructor accepts.
+//
+// One would already remove the branch and make the arithmetic total, so this
+// floor is not about well-definedness. It is about the bound in §7 of the BLS:
+// zeroing out a victim's deposit costs the attacker roughly the deposit times
+// this number, and at a virtual amount of one that cost equals the deposit —
+// which is a real cost, but not a deterrent against a large enough target.
+// 10^3 is the value OpenZeppelin's `ERC4626` uses as its default decimals
+// offset, and it puts the attack three orders of magnitude underwater.
+//
+// It is a floor, not a constant: the right value depends on the decimals of
+// the asset, which a library pointed at an arbitrary token cannot know. That
+// is the whole reason it is a constructor argument.
+pure fn min_virtual_shares() -> U256 { 1000 }

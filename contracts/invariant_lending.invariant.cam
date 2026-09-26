@@ -1,0 +1,59 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Showcase fixture for the Foundry invariant pipeline. Touches every
+// extra handler feature so the snapshot test catches
+// regressions in tag/runs propagation, computed bounds, snapshot/query
+// helpers, time advancement, and exclusion filters.
+
+invariant "borrowed never exceeds total assets" for LendingPair
+    #[tag("INV-LEND-001")]
+    #[runs(2000)]
+    #[depth(80)]
+    #[with_time]
+{
+    init { m_total_assets: 1000, m_borrowed: 0 }
+
+    track {
+        let initial_total = m_total_assets
+        let initial_borrowed = m_borrowed
+    }
+
+    derived utilization() -> u128 {
+        return (m_borrowed * 100) / m_total_assets
+    }
+
+    exclude senders { 0x0000000000000000000000000000000000000001 }
+    exclude selectors { accrueInterest }
+
+    action deposit(amount: u128) {
+        bound amount in 1..m_total_assets
+    }
+
+    action withdraw(amount: u128) {
+        skip if m_total_assets == 0
+        bound amount in 1..m_total_assets
+    }
+
+    action accrueInterest() {
+        advanceTime(3600)
+    }
+
+    check m_borrowed <= m_total_assets
+    check utilization() <= 100
+    check m_total_assets >= initial_total
+}
+
+// "Randomize everything except this field": the bare `*` forall-izes every
+// state member, while the explicit pin holds `m_total_assets` fixed at 0.
+// On the dynamic targets the non-pinned member (`m_borrowed`) is seeded with
+// a fuzzer-random value, while `m_total_assets` keeps its literal.
+invariant "borrowed bounded from any start but assets" for LendingPair {
+    init { *, m_total_assets: 0 }
+
+    action deposit(amount: u128) {
+        bound amount in 0..1000
+    }
+
+    check m_borrowed >= 0
+}

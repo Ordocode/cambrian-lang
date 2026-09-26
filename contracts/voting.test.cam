@@ -1,0 +1,104 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Voting — DAO governance with proposals and time-based execution
+
+test "constructor sets quorum and period" for Voting {
+    call constructor(3, 86400)
+    expect state { m_quorum: 3, m_voting_period: 86400, m_proposal_count: 0 }
+}
+
+test "createProposal increments counter" for Voting {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    call constructor(1, 86400)
+
+    msg { sender: alice, timestamp: 1000 }
+    call createProposal("Build new feature")
+    expect state { m_proposal_count: 1 }
+
+    msg { sender: alice, timestamp: 1001 }
+    call createProposal("Fix bug")
+    expect state { m_proposal_count: 2 }
+}
+
+test "getProposalCount returns count" for Voting {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    call constructor(1, 86400)
+    call getProposalCount()
+    expect return 0
+
+    msg { sender: alice, timestamp: 1000 }
+    call createProposal("Proposal A")
+    call getProposalCount()
+    expect return 1
+}
+
+test "vote on nonexistent proposal throws" for Voting {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    call constructor(1, 86400)
+
+    msg { sender: alice, timestamp: 1000 }
+    call vote(99, true)
+    expect throw 3
+}
+
+test "vote on active proposal succeeds" for Voting {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    call constructor(1, 86400)
+
+    msg { sender: alice, timestamp: 1000 }
+    call createProposal("Upgrade system")
+
+    msg { sender: bob, timestamp: 1500 }
+    call vote(0, true)
+    expect state { m_proposal_count: 1 }
+}
+
+test "executeProposal on nonexistent throws" for Voting {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    call constructor(1, 86400)
+
+    msg { sender: alice, timestamp: 100000 }
+    call executeProposal(42)
+    expect throw 3
+}
+
+test "executeProposal still active throws" for Voting {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    call constructor(1, 86400)
+
+    msg { sender: alice, timestamp: 1000 }
+    call createProposal("Too early")
+
+    msg { sender: bob, timestamp: 1500 }
+    call vote(0, true)
+
+    msg { sender: alice, timestamp: 2000 }
+    call executeProposal(0)
+    expect throw 4
+}
+
+test "executeProposal not passed throws" for Voting {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    call constructor(1, 100)
+
+    msg { sender: alice, timestamp: 1000 }
+    call createProposal("Will fail")
+
+    msg { sender: bob, timestamp: 1050 }
+    call vote(0, false)
+
+    msg { sender: alice, timestamp: 1200 }
+    call executeProposal(0)
+    expect throw 6
+}

@@ -1,0 +1,29 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-008 / X-H10: invariant fuzz `bound` on `u64` route param — EVM handler
+// emits `uint256(bound(...))` assignment to a `uint64` local.
+
+entity BoundU64 {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        touch(amount: u64) => []
+    }
+
+    m_count: u64 {
+        in create() => 0
+        in touch(amount) => amount
+    }
+}
+
+invariant "count bounded" for BoundU64 {
+    init { m_count: 0 }
+
+    action touch(amount: u64) {
+        bound amount in 0..1000
+    }
+
+    check m_count >= 0
+}

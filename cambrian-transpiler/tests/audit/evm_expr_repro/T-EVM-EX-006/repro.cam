@@ -1,0 +1,11 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity ExprProbe {
+routes {
+constructor() => []
+eq(n: u64) => [ let b = m_count == n; ]
+}
+m_count: u64 { in constructor() => 0 }
+
+}

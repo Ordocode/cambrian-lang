@@ -1,0 +1,41 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-003: deploy with non-identity constructor args must initialize
+// callee members. EVM: factory calls `initialize(initial)`. Lean: must
+// project init args into `withVault` state, not only identity + default.
+
+entity Vault {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor(initial: u64) => []
+
+        getBalance() -> u64 => [
+            return(m_balance)
+        ]
+    }
+
+    m_balance: u64 {
+        in constructor(initial) => initial
+    }
+}
+
+entity Deployer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        spawn(id: u64, initial: u64) => [
+            deploy Vault(id, initial)
+        ]
+    }
+
+    m_spawns: u64 {
+        in constructor() => 0
+        in spawn(_, _) => m_spawns + 1
+    }
+}

@@ -1,0 +1,42 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-S-014 row 3 / PW3-G-012: phased `^m_a` temporal ref + invariant trace.
+
+entity CaretPhase {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        bump(n: u64) => [
+            inc: []
+            snap: []
+        ]
+    }
+
+    m_a: u64 {
+        in constructor() => 5
+        in bump(n) => inc: m_a + n
+    }
+
+    m_b: u64 {
+        in constructor() => 0
+        in bump(n) => snap: ^m_a
+    }
+
+    m_steps: u64 {
+        in constructor() => 0
+        in bump(n) => snap: m_steps + 1
+    }
+}
+
+invariant "caret phase trace" for CaretPhase {
+    init { m_a: 5, m_b: 0, m_steps: 0 }
+
+    action bump(n: u64) {
+        bound n in 1..10
+    }
+
+    check m_b <= m_a
+    check trace::count(bump) <= trace::length
+}

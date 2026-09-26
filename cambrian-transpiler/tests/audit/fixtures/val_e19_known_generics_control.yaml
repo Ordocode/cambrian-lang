@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: val-e19-known-generics-control-audit
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - val_e19_known_generics_control.cam

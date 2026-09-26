@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-LEAN-010 fixture B: default lean config (proof_helpers on, BitVec numerics).
+
+entity TlLeakB {
+    routes {
+        #[factory_only]
+        init create() => []
+        inc() => []
+    }
+
+    m_count: u64 {
+        in create() => 0
+        in inc() => m_count + 1
+    }
+}
+
+invariant "bounded-b" for TlLeakB {
+    init { m_count: 0 }
+    action inc() { }
+    check m_count < 1000
+}

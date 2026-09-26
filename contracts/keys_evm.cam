@@ -1,0 +1,39 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// EVM iterable HashMap fixture (Phase EVM-13).
+//
+// Cambrian `HashMap` lowers to a Solidity `mapping(K => V)`, which has
+// no built-in length / key enumeration. When any route or transform
+// iterates the map (`m.keys()`, `m.iter()`, `m.values()`), the EVM
+// backend auto-emits a parallel `K[]` index array plus an
+// `m_keys_index` reverse-lookup mapping so insert / update / remove can
+// maintain it in O(1) (push or swap-pop). This fixture exercises:
+//
+//   * iteration via `for k in m.keys() { … }` (the for-expression
+//     materialises the body's value into a `K[]` memory return).
+//   * read-through of the original mapping inside the body
+//     (`m_balances[k]`).
+//   * `insert` and `remove` paths against the same iterated map, so
+//     the parallel-array maintenance fires from both sides.
+//
+// Iterator-method chains (`.iter()`, `.values()`, `.collect()`) are
+// covered by unit tests; this fixture's job is end-to-end solc
+// compatibility, so it keeps to the simplest user-facing shape.
+
+entity Registry {
+    routes {
+        constructor() => []
+        register(k: address, v: u64) => []
+        unregister(k: address) => []
+        listKeys() -> Vec<address> => [
+            let ks = m_balances.keys().collect();
+            return(ks)
+        ]
+    }
+
+    m_balances: HashMap<address, u64> {
+        in register(k, v) => m_balances.insert(k, v)
+        in unregister(k) => m_balances.remove(k)
+    }
+}

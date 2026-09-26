@@ -1,0 +1,27 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Invariant: a fresh `ERC20` instance with `m_token_id = 1` reports
+// `totalSupply() == 0` regardless of how the random fuzzer drives
+// transfer/transferFrom/approve. None of those routes mint, so the
+// total-supply slot must stay at its constructor value.
+//
+// G-U9: this fixture exercises identity-member seeding through
+// `with { ... }`. The handler's deploy now picks up `m_token_id: 1`
+// (instead of the historical `0` default), giving the invariant a
+// stable, multi-instance-safe address.
+
+invariant "totalSupply is conserved across non-mint routes" for ERC20 {
+    with { m_token_id: 1 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action transfer(to: address, amount: U256) { }
+    action transferFrom(from_addr: address, to: address, amount: U256) { }
+    action approve(spender: address, amount: U256) { }
+
+    check totalSupply() == 0
+}

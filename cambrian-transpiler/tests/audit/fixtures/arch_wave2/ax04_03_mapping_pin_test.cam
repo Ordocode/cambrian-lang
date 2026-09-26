@@ -1,0 +1,13 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+import "./ax04_03_mapping_pin_entity.cam"
+
+test "mapping pin credit" for MapPinProbe with {
+    m_balances: { SEED => 10 }
+} {
+    let SEED = 0x0000000000000000000000000000000000000001
+    call credit(SEED, 5)
+    call read(SEED)
+    expect return 15
+}

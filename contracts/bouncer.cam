@@ -1,0 +1,98 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Bouncer: tests unified rescue/recover bounce handling:
+//   1. rescue/recover on named send (same-entity: acceptValue)
+//   2. rescue/recover on plain transfer
+//   3. Named send WITHOUT rescue — bounce is silently accepted
+//   4. rescue/recover on cross-entity named send (Target.receive)
+//   5. rescue/recover on deploy (Target deploy with bad code)
+
+entity Bouncer {
+
+    routes {
+        // Same-entity named send with rescue/recover
+        sendBounce(dest: Address<Bouncer>, value: u64) => [
+            rescue bounce_failed: acceptValue(value) ~> dest
+        ]
+        acceptValue(value: u64) => []
+
+        // Cross-entity named send with rescue/recover
+        sendCrossEntity(dest: Address<Target>, value: u64) => [
+            rescue cross_failed: acceptIncoming(value) ~> dest
+        ]
+
+        // Plain transfer with rescue/recover
+        sendTransfer(dest: address, value: u64) => [
+            rescue transfer_failed: ~> dest with { value: value }
+        ]
+
+        // Deploy with rescue/recover
+        deployTarget(code: CamData) => [
+            rescue deploy_failed: deploy Target with { value: 1000000, stateInit: Target.state(code) }
+        ]
+
+        // Named send WITHOUT rescue — bounce is silently accepted
+        sendUnrescued(dest: Address<Bouncer>, value: u64) => [
+            ping(value) ~> dest
+        ]
+        ping(value: u64) => []
+
+        recover bounce_failed(body: CamData) => []
+        recover cross_failed(body: CamData) => []
+        recover transfer_failed(body: CamData) => []
+        recover deploy_failed(body: CamData) => []
+
+        getBounceCount() -> u64 => [
+            return(m_bounce_count)
+        ]
+        getCrossCount() -> u64 => [
+            return(m_cross_count)
+        ]
+        getTransferBounceCount() -> u64 => [
+            return(m_transfer_bounce_count)
+        ]
+        getDeployFailCount() -> u64 => [
+            return(m_deploy_fail_count)
+        ]
+        getSent() -> u64 => [
+            return(m_last_sent)
+        ]
+    }
+
+    m_last_sent: u64 {
+        in sendBounce(_, value) => value
+        in sendCrossEntity(_, value) => value
+        in sendTransfer(_, value) => value
+        in sendUnrescued(_, value) => value
+    }
+
+    m_received: u64 {
+        in acceptValue(value) => m_received + value
+    }
+
+    m_bounce_count: u64 {
+        in recover_bounce_failed(_) => m_bounce_count + 1
+    }
+
+    m_cross_count: u64 {
+        in recover_cross_failed(_) => m_cross_count + 1
+    }
+
+    m_transfer_bounce_count: u64 {
+        in recover_transfer_failed(_) => m_transfer_bounce_count + 1
+    }
+
+    m_deploy_fail_count: u64 {
+        in recover_deploy_failed(_) => m_deploy_fail_count + 1
+    }
+}
+
+entity Target {
+    routes {
+        acceptIncoming(value: u64) => []
+    }
+    m_value: u64 {
+        in acceptIncoming(value) => value
+    }
+}

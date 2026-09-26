@@ -1,0 +1,37 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis LEAN-H7: dynamic dispatch (`~> m_dest` on `Address<E>`)
+// passes `value` into `Cambrian.Generated.Dispatch.*` but must also debit
+// the caller balance in `WorldState` (ledger transfer), like static sends.
+
+entity Payee {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+        accept deposit() => []
+    }
+
+    m_x: u64 {
+        in create() => 0
+    }
+}
+
+entity Payer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create(dest: Address<Payee>) => []
+
+        pay(amount: u128) => [
+            deposit() ~> m_dest with { value: amount }
+        ]
+    }
+
+    m_dest: Address<Payee> {
+        in create(dest) => dest
+    }
+}

@@ -1,0 +1,35 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H12: raw named send to plain address builds selector
+// with `uint256` for address args (infer_sig_type) while encoding uses address.
+
+entity Target {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        setOwner(owner: address) => []
+        getOwner() -> address => [
+            return(m_owner)
+        ]
+    }
+
+    m_owner: address {
+        in constructor() => address(0)
+        in setOwner(owner) => owner
+    }
+}
+
+entity Caller {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        poke(dest: address, who: address) => [
+            setOwner(who) ~> dest
+        ]
+    }
+}

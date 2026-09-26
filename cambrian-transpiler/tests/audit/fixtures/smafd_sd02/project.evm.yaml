@@ -1,0 +1,13 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: smafd-sd02
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - sd02_token.cam
+  - sd02_fuzz_max.cam
+  - sd02_max_decimal.cam
+  - sd02_allowance_token.cam
+  - sd02_infinite_allowance.cam

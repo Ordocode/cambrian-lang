@@ -1,0 +1,16 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-O-005 — cyclic type alias (V52 guards records only, not aliases).
+type A = B
+type B = A
+
+entity AliasCycle {
+    routes {
+        #[factory_only]
+        constructor() => []
+    }
+    m_x: A {
+        in constructor() => 0 as A
+    }
+}

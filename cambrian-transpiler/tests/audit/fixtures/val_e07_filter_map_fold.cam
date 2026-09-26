@@ -1,0 +1,27 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-VAL-001 / X-H1: EVM-12 lowers `.filter().map().fold()` on `Vec<T>`,
+// but validator may still emit stale `[E07]` on the fused chain.
+
+pure fn sum_doubled_positive(xs: Vec<U256>) -> U256 {
+    xs.filter(|x| *x > 0).map(|x| *x * 2).fold(0, |acc, x| acc + x)
+}
+
+entity ChainFold {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        compute(xs: Vec<U256>) => []
+
+        getSum() -> U256 => [
+            return(m_sum)
+        ]
+    }
+
+    m_sum: U256 {
+        in constructor() => 0
+        in compute(xs) => sum_doubled_positive(xs)
+    }
+}

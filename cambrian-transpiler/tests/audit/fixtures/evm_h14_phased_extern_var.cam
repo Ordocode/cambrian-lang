@@ -1,0 +1,30 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H14: phased VarCall to extern entity falls back to
+// uint256 return type instead of the declared bool.
+
+extern entity Oracle {
+    view route isAlive() -> bool;
+}
+
+entity Caller {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor(oracle: Address<Oracle>) => []
+        check() -> bool => [
+            fetch: [
+                var alive = isAlive() ~> m_oracle;
+            ]
+            done: [
+                return(alive)
+            ]
+        ]
+    }
+
+    m_oracle: Address<Oracle> {
+        in constructor(oracle) => oracle
+    }
+}

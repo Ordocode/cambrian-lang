@@ -1,0 +1,12 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: arch-ax01-06-lean
+target: lean
+deterministic_addresses: true
+output_dir: build/
+lean:
+  numerics: overflow-panic
+  intrinsics: executable
+sources:
+  - ax01_06_raw_transfer_receive.cam

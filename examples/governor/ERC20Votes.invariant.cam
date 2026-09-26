@@ -1,0 +1,25 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Stateful invariant: total supply is bounded by the initial mint plus
+// any subsequent mints minus any burns. We use a coarse invariant —
+// "supply does not exceed an absolute ceiling we never approach in the
+// action distribution" — because the OZ semantics of mint/burn are
+// re-implemented faithfully.
+
+invariant "total supply within bound" for ERC20Votes {
+    init { m_total_supply: 1000 }
+
+    action transfer(to: address, amount: U256) {
+        bound amount in 0..100
+    }
+    action mint(to: address, amount: U256) {
+        bound amount in 0..100
+    }
+    action burn(amount: U256) {
+        bound amount in 0..100
+    }
+    action delegate(to: address) { }
+
+    check m_total_supply <= 1000000000
+}

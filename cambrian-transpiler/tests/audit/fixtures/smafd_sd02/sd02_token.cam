@@ -1,0 +1,26 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// SD-02 S5a: full-width U256 via 64-nibble hex in property surface (PROP-CORE-008 shaped).
+
+entity Sd02Token {
+    routes {
+        #[factory_only]
+        constructor() => []
+        setMax() => []
+        getMax() -> U256 => [
+            return(m_val)
+        ]
+    }
+
+    m_val: U256 {
+        in constructor() => 0
+        in setMax() => 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+    }
+}
+
+property "hex max roundtrip" () for Sd02Token {
+    call setMax()
+    call getMax()
+    expect return 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+}

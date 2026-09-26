@@ -1,0 +1,145 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Fixture for the Lean "error-condition reflection" regression
+// (`lean_reflection_proofs_build`). Pairs with
+// `tests/fixtures/lean_reflection_proofs.lean`.
+//
+// `Bank` exercises the unphased path (single + chained `where` guards);
+// `Gate` exercises the flat path with a `from`-check guard;
+// `Vault` exercises the phased path (a per-phase guard in each phase).
+// The proof file reflects `(route …).isOk` into the generated
+// `_pre_<i>` predicates via the `cambrian_route_simp` / `cambrian_pre_simp`
+// simp sets emitted by codegen, and exercises the design-B `<route>.Pre`
+// + `<route>_isOk_iff` characterization (flat guard-level for Bank/Gate,
+// abstract fallback for the phased Vault).
+
+entity Bank {
+    routes {
+        deposit(amount: u128)
+            where amount > 0 : throw 101
+        => [
+        ]
+
+        withdraw(amount: u128)
+            where amount > 0 : throw 101 &&
+            amount <= m_balance : throw 102
+        => [
+        ]
+    }
+
+    m_balance: u128 {
+        in deposit(amount) => m_balance + amount
+        in withdraw(amount) => m_balance - amount
+    }
+}
+
+entity Gate {
+    routes {
+        bump(amount: u128)
+            from m_owner
+            where amount > 0 : throw 101
+        => [
+        ]
+    }
+
+    m_owner: address {
+    }
+
+    m_count: u128 {
+        in bump(amount) => m_count + amount
+    }
+}
+
+entity Vault {
+    routes {
+        process(amount: u128)
+        => [
+            check where (amount > 0) : throw 401 : [
+            ]
+            apply where (amount <= m_cap) : throw 402 : [
+            ]
+        ]
+    }
+
+    m_cap: u128 {
+    }
+
+    m_total: u128 {
+        in process(amount) => apply: m_total + amount
+    }
+}
+
+// Concrete `test` blocks: these exercise the auto-discharged proof
+// ladder (`first | (simp [cambrian_route_simp, cambrian_member_simp,
+// cambrian_pre_simp, cambrian_except_simp, World.*]) | … | sorry`).
+// Every test below is fully concrete, so the ladder closes it without
+// falling back to `sorry` — the gated `lake build` fails if the proof
+// codegen regresses.
+//
+// The `property` / `invariant` blocks at the bottom exercise the same
+// reflection ladder under quantifiers: properties run a *contextual*
+// `simp` (so an `assume` precondition discharges a fallible route's
+// guard), and invariants run the per-invariant `invByCases` scaffolding
+// tactic (trace induction + per-action case split). All of them are
+// chosen to close fully, so the build stays `sorry`-free.
+
+test "deposit credits balance" for Bank with { m_balance: 5 } {
+    call deposit(3)
+    expect state { m_balance: 8 }
+}
+
+test "deposit zero reverts" for Bank with { m_balance: 5 } {
+    call deposit(0)
+    expect throw 101
+}
+
+test "withdraw debits balance" for Bank with { m_balance: 10 } {
+    call withdraw(4)
+    expect state { m_balance: 6 }
+}
+
+test "withdraw over balance reverts" for Bank with { m_balance: 1 } {
+    call withdraw(9)
+    expect throw 102
+}
+
+test "bump increments count" for Gate with { m_count: 7 } {
+    call bump(2)
+    expect state { m_count: 9 }
+}
+
+// Property: a fallible route under a quantifier. The `assume amount > 0`
+// precondition is what the contextual `simp` rung uses to discharge the
+// `deposit` guard, so the `.error` branch is impossible and the `.ok`
+// branch yields `0 + amount = amount`.
+property "deposit credits any amount" (amount: u128) for Bank with { m_balance: 0 } {
+    assume amount > 0
+    call deposit(amount)
+    expect state { m_balance: amount }
+
+    fuzz { amount in 1..1000 }
+}
+
+// Invariant: an unsigned `>= 0` check holds after any trace regardless of
+// the (dropped) sampling bounds, so `invByCases` closes it outright via the
+// `cambrian_bitvec_simp` rung — even though both actions are fallible.
+invariant "balance stays nonneg" for Bank {
+    init { m_balance: 0 }
+
+    action deposit(amount: u128) { bound amount in 0..1000 }
+    action withdraw(amount: u128) { bound amount in 0..1000 }
+
+    check m_balance >= 0
+}
+
+// Invariant over a `from`-guarded fallible route: the executable
+// `match runTrace … with | .error _ => True | .ok w => …` theorem still
+// closes for the trivial check.
+invariant "gate count stays nonneg" for Gate {
+    init { m_count: 0 }
+
+    action bump(amount: u128) { bound amount in 0..1000 }
+
+    check m_count >= 0
+}

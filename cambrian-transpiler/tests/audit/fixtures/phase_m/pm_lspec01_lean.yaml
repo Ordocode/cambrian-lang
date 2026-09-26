@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pm-lspec01
+target: lean
+output_dir: build/
+sources:
+  - pm_lspec01_entity.cam
+  - pm_lspec01_test.cam

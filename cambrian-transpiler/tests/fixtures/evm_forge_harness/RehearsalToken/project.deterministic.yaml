@@ -1,0 +1,12 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Regression: factory + initialize lowering (partial fix today; setUp harness still incomplete).
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - RehearsalToken.cam
+  - RehearsalToken.test.cam
+  - RehearsalToken.integration.test.cam
+  - RehearsalToken.invariant.cam

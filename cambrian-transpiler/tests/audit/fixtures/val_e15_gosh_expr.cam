@@ -1,0 +1,16 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-VAL-004: `gosh::*` in expression position must trigger validator E15 on EVM target.
+
+use gosh
+
+entity GoshExprProbe {
+    routes {
+        view get() -> u64 => [
+            return(gosh::sha256(0))
+        ]
+    }
+
+    m_dummy: u64 {}
+}

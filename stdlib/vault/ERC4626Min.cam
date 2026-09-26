@@ -1,0 +1,418 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// ERC4626Min — tokenised vault, route layer.
+//
+// The full ERC-4626 route set over the textbook proportional conversion. What
+// this entity claims is the shape of the interface: who may call each route,
+// what each route reverts on, and which way each inexact division rounds. It
+// does not claim that any particular number comes out, and it is not safe to
+// deploy against an untrusted first depositor. `ERC4626.cam` is that vault.
+//
+// Ground truth: `product/stdlib/bls/erc4626-min.md`. Read §7 of that document
+// before choosing this over the full vault — the first-holder attack is
+// explicitly out of its scope, and out of scope means "this entity is
+// vulnerable to it", not "this entity is fine".
+//
+// ## What it implements
+//
+//   - ERC-4626: deposit, mint, withdraw, redeem; asset, totalAssets, the four
+//     convert/preview pairs and the four limit routes.
+//   - The share as an ERC-20: transfer, transferFrom, approve, balanceOf,
+//     allowance, totalSupply, name, symbol, decimals.
+//
+// ## Rounding, which is the whole safety story here
+//
+// Every one of the four write routes moves value across the boundary of the
+// vault, and every conversion at that boundary can leave a remainder. A
+// remainder that resolves toward the caller is value leaving against no
+// share, and every other holder pays it. So each direction is fixed the way
+// the standard fixes it — against the caller, in favour of the vault:
+//
+//   deposit / previewDeposit    assets → shares, down
+//   mint    / previewMint       shares → assets, up
+//   withdraw/ previewWithdraw   assets → shares, up
+//   redeem  / previewRedeem     shares → assets, down
+//
+// `convertToShares` and `convertToAssets` both round down; the standard says
+// they are the unbiased informational pair and must not be used to price a
+// call.
+//
+// ## Throw codes
+//
+//   1  zero amount (share transfer)
+//   2  insufficient share balance (share transfer)
+//   3  insufficient share allowance (share transferFrom)
+//   7  zero address as a share recipient or approval spender
+//   20 zero address as a vault receiver or owner
+//   21 the owner holds fewer shares than the burn requires
+//   22 the caller is neither the owner nor approved for that many shares
+//   23 the vault holds less than the asset amount requested
+//   24 the asset's transfer answered false
+//
+// Codes 1–7 are the base token's and mean the same thing here, because the
+// share ledger is that token's ledger. 20–24 are the vault's own.
+//
+// 24 is worth a sentence. ERC-20 lets a token report failure by answering
+// `false` instead of reverting, and a vault that ignores the answer credits
+// shares against assets that never arrived. So each of the four writes
+// captures the boolean and checks it in the following phase. On the way out
+// (`withdraw`, `redeem`) the check is after the burn has already committed,
+// which is deliberate: the revert unwinds the burn with it, and doing it the
+// other way round would mean calling out before the effect.
+//
+// ## Deviations worth knowing before you deploy this
+//
+//   - **The first-holder attack works.** The conversion has an empty-vault
+//     branch, so the first depositor sets the rate; a one-wei deposit
+//     followed by a large direct transfer makes the next depositor's shares
+//     round to zero. Use `ERC4626.cam` unless the first deposit is yours.
+//   - **The requested amount is credited, not the received amount.** A
+//     fee-on-transfer asset delivers less than `assets`, and this vault issues
+//     shares against `assets` anyway, so existing holders pay the fee.
+//     `ERC4626.cam` reads its own balance either side of the transfer and
+//     credits the difference.
+//   - **No permit on the share.** EIP-2612 is on the base token and not here;
+//     a holder approves a router with `approve`.
+//   - **No `supportsInterface`.** ERC-4626 does not require ERC-165, so
+//     unlike the uRWA entities this is not a missed MUST.
+//
+// None of the three is a defect to patch locally: the first two are what
+// separates this entity from the full one, and the third is what the standard
+// asks for.
+
+import "./erc4626-core.cam"
+
+entity ERC4626Min {
+
+    // ERC-4626 names both, and an indexer needs them: a vault's deposit
+    // history is not recoverable from the share ledger, because `Transfer`
+    // from the zero address says how many shares appeared and nothing about
+    // what was paid for them. The share token owes the ERC-20 log as well.
+    event Deposit(indexed sender: address, indexed owner: address,
+                  assets: U256, shares: U256);
+    event Withdraw(indexed sender: address, indexed receiver: address,
+                   indexed owner: address, assets: U256, shares: U256);
+    event Transfer(indexed from_addr: address, indexed to: address, value: U256);
+    event Approval(indexed owner: address, indexed spender: address, value: U256);
+
+    // The asset is an identity, not a constructor argument, for the same
+    // reason `UniswapV2Pair`'s two tokens are: it participates in the CREATE2
+    // salt, so a caller can compute the vault's address for a given asset
+    // before the vault exists. It is also what makes the member typed, which
+    // is what lets `balanceOf(sys::address) ~> m_asset` lower to a call.
+    identity m_asset: Address<VaultAsset>
+
+    routes {
+        #[factory_only]
+        constructor(name_: String, symbol_: String, decimals_: u8) => []
+
+        // ── ERC-4626 writes ─────────────────────────────────────────────
+        //
+        // All four are phased, and they have to be: the conversion needs the
+        // vault's asset balance, which is a cross-contract read, and a `~>`
+        // capture is only readable from a later phase. The route-level
+        // `where` therefore carries only what can be decided without that
+        // read, and the amount checks sit on a per-phase `where`.
+        //
+        // The `let` bound in `read:` and consumed in the settling phase is
+        // what makes the answer the pre-commit one. A `return` runs after the
+        // member transforms have committed, so recomputing the conversion
+        // there would divide by the supply the call had just changed.
+
+        deposit(assets: U256, receiver: address) -> U256
+            where receiver != zero_address() : throw 20
+        => [
+            read: [
+                var held = balanceOf(sys::address) ~> m_asset;
+                let issued = ratio_shares_down(assets, m_total_supply, held);
+            ]
+            pull: [
+                var paid = transferFrom(msg::sender, sys::address, assets) ~> m_asset;
+            ]
+            issue where paid : throw 24 : [
+                emit Transfer(zero_address(), receiver, issued);
+                emit Deposit(msg::sender, receiver, assets, issued);
+                return(issued)
+            ]
+        ]
+
+        // `mint` is the same trade read from the other end: the caller names
+        // the shares and pays whatever they cost, rounded up.
+        mint(shares: U256, receiver: address) -> U256
+            where receiver != zero_address() : throw 20
+        => [
+            read: [
+                var held = balanceOf(sys::address) ~> m_asset;
+                let cost = ratio_assets_up(shares, m_total_supply, held);
+            ]
+            pull: [
+                var paid = transferFrom(msg::sender, sys::address, cost) ~> m_asset;
+            ]
+            issue where paid : throw 24 : [
+                emit Transfer(zero_address(), receiver, shares);
+                emit Deposit(msg::sender, receiver, cost, shares);
+                return(cost)
+            ]
+        ]
+
+        // The asset leaves in the same phase the shares are burnt, and the
+        // burn commits first: member transforms are written before the phase's
+        // actions run, so this is checks-effects-interactions without having
+        // to say so.
+        withdraw(assets: U256, receiver: address, owner: address) -> U256
+            where receiver != zero_address() : throw 20 &&
+                  owner    != zero_address() : throw 20
+        => [
+            read: [
+                var held = balanceOf(sys::address) ~> m_asset;
+                let burnt = ratio_shares_up(assets, m_total_supply, held);
+            ]
+            settle where held >= assets : throw 23 &&
+                        balance_of(m_balances, owner) >= burnt : throw 21 &&
+                        share_spend_allowed(m_allowances, owner,
+                                            msg::sender, burnt) : throw 22 : [
+                var sent = transfer(receiver, assets) ~> m_asset;
+            ]
+            done where sent : throw 24 : [
+                emit Transfer(owner, zero_address(), burnt);
+                emit Withdraw(msg::sender, receiver, owner, assets, burnt);
+                return(burnt)
+            ]
+        ]
+
+        redeem(shares: U256, receiver: address, owner: address) -> U256
+            where receiver != zero_address() : throw 20 &&
+                  owner    != zero_address() : throw 20
+        => [
+            read: [
+                var held = balanceOf(sys::address) ~> m_asset;
+                let payout = ratio_assets_down(shares, m_total_supply, held);
+            ]
+            settle where balance_of(m_balances, owner) >= shares : throw 21 &&
+                        share_spend_allowed(m_allowances, owner,
+                                            msg::sender, shares) : throw 22 : [
+                var sent = transfer(receiver, payout) ~> m_asset;
+            ]
+            done where sent : throw 24 : [
+                emit Transfer(owner, zero_address(), shares);
+                emit Withdraw(msg::sender, receiver, owner, payout, shares);
+                return(payout)
+            ]
+        ]
+
+        // ── ERC-4626 reads ──────────────────────────────────────────────
+
+        view asset() -> address => [ return(m_asset) ]
+
+        // The vault's own balance on the asset, not a running total it keeps
+        // itself. A tracked counter would be cheaper and would be wrong about
+        // every asset the vault does not control: a direct transfer, a fee, a
+        // rebase and a seizure all move the real number and none of them call
+        // a route. What a holder can redeem is decided by what is actually
+        // there.
+        view totalAssets() -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(held) ]
+        ]
+
+        // The informational pair. Both round down, and neither is what a
+        // caller should price a trade against — that is what the four
+        // `preview` routes are for, and they disagree with these two by one
+        // unit exactly when the division is inexact.
+        view convertToShares(assets: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(ratio_shares_down(assets, m_total_supply, held)) ]
+        ]
+
+        view convertToAssets(shares: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(ratio_assets_down(shares, m_total_supply, held)) ]
+        ]
+
+        // Each `preview` answers exactly what the matching write route
+        // returns at the same state — that is P0-9, and it is the property
+        // that makes the four of them worth having at all. They are written
+        // as the same call to the same conversion so the two cannot drift.
+        view previewDeposit(assets: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(ratio_shares_down(assets, m_total_supply, held)) ]
+        ]
+
+        view previewMint(shares: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(ratio_assets_up(shares, m_total_supply, held)) ]
+        ]
+
+        view previewWithdraw(assets: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(ratio_shares_up(assets, m_total_supply, held)) ]
+        ]
+
+        view previewRedeem(shares: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(ratio_assets_down(shares, m_total_supply, held)) ]
+        ]
+
+        // The deposit side is uncapped, so the limit is the type's ceiling.
+        // The withdrawal side is not: it is what the owner's shares are
+        // actually worth, which makes P0-10 ("above the limit reverts") a
+        // claim with content rather than a vacuous truth about 2^256.
+        view maxDeposit(receiver: address) -> U256 => [
+            return(u256_max())
+        ]
+
+        view maxMint(receiver: address) -> U256 => [
+            return(u256_max())
+        ]
+
+        view maxWithdraw(owner: address) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [
+                return(ratio_assets_down(balance_of(m_balances, owner),
+                                         m_total_supply, held))
+            ]
+        ]
+
+        view maxRedeem(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        // ── The share, as an ERC-20 ─────────────────────────────────────
+        //
+        // Same guards, same throw codes and same self-transfer handling as
+        // `token/ERC20.cam`; see that file for why the aliasing branch in the
+        // balance transform is load-bearing. There is no mint or burn route:
+        // shares are created and destroyed by the four vault routes and by
+        // nothing else, which is what keeps `totalSupply` meaning "claims
+        // against `totalAssets`".
+        transfer(to: address, amount: U256) -> bool
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 2
+        => [
+            emit Transfer(msg::sender, to, amount);
+            return(true)
+        ]
+
+        transferFrom(from_addr: address, to: address, amount: U256) -> bool
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  balance_of(m_balances, from_addr) >= amount : throw 2 &&
+                  allowance_of(m_allowances, from_addr, msg::sender) >= amount : throw 3
+        => [
+            emit Transfer(from_addr, to, amount);
+            return(true)
+        ]
+
+        approve(spender: address, amount: U256) -> bool
+            where spender != zero_address() : throw 7
+        => [
+            emit Approval(msg::sender, spender, amount);
+            return(true)
+        ]
+
+        view name() -> String => [ return(m_name) ]
+        view symbol() -> String => [ return(m_symbol) ]
+        view decimals() -> u8 => [ return(m_decimals) ]
+        view totalSupply() -> U256 => [ return(m_total_supply) ]
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        view allowance(owner: address, spender: address) -> U256 => [
+            return(allowance_of(m_allowances, owner, spender))
+        ]
+    }
+
+    m_name: String { in constructor(name_, _, _) => name_ }
+    m_symbol: String { in constructor(_, symbol_, _) => symbol_ }
+    m_decimals: u8 { in constructor(_, _, decimals_) => decimals_ }
+
+    // Every transform below recomputes its conversion from `held` and the
+    // pre-commit `m_total_supply` rather than reading the `let` the route
+    // bound. A member transform cannot see a route-body binding — they are
+    // separate scopes — and the recomputation is exact rather than merely
+    // close: transforms in one phase all read the state as it was when the
+    // phase began, so `m_total_supply` here is the same value the route's
+    // `read:` phase saw.
+    m_total_supply: U256 {
+        in deposit(assets, _) => issue: {
+            m_total_supply + ratio_shares_down(assets, m_total_supply, held)
+        }
+        in mint(shares, _) => issue: { m_total_supply + shares }
+        in withdraw(assets, _, _) => settle: {
+            m_total_supply - ratio_shares_up(assets, m_total_supply, held)
+        }
+        in redeem(shares, _, _) => settle: { m_total_supply - shares }
+    }
+
+    m_balances: HashMap<address, U256> {
+        in deposit(assets, receiver) => issue: {
+            let prev = balance_of(m_balances, receiver);
+            m_balances.update(receiver,
+                prev + ratio_shares_down(assets, m_total_supply, held))
+        }
+        in mint(shares, receiver) => issue: {
+            let prev = balance_of(m_balances, receiver);
+            m_balances.update(receiver, prev + shares)
+        }
+        in withdraw(assets, _, owner) => settle: {
+            let prev = balance_of(m_balances, owner);
+            m_balances.update(owner,
+                prev - ratio_shares_up(assets, m_total_supply, held))
+        }
+        in redeem(shares, _, owner) => settle: {
+            let prev = balance_of(m_balances, owner);
+            m_balances.update(owner, prev - shares)
+        }
+        in transfer(to, amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            let bal_to   = balance_of(m_balances, to);
+            if to == msg::sender { m_balances } else {
+                m_balances
+                    .update(msg::sender, bal_from - amount)
+                    .update(to,          bal_to   + amount)
+            }
+        }
+        in transferFrom(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            if to == from_addr { m_balances } else {
+                m_balances
+                    .update(from_addr, bal_from - amount)
+                    .update(to,        bal_to   + amount)
+            }
+        }
+    }
+
+    // The share allowance covers two different spends and both go through
+    // the same slot: a plain `transferFrom` of the share, and a `withdraw` or
+    // `redeem` where the caller is not the owner. The second is the one
+    // routers use, and forgetting to decrement it there is how a single
+    // approval becomes an unlimited one.
+    m_allowances: HashMap<U256, U256> {
+        in approve(spender, amount) => {
+            m_allowances.update(hashOf(msg::sender, spender), amount)
+        }
+        in transferFrom(from_addr, _, amount) => {
+            let key  = hashOf(from_addr, msg::sender);
+            let prev = allowance_of(m_allowances, from_addr, msg::sender);
+            m_allowances.update(key, allowance_after_spend(prev, amount))
+        }
+        in withdraw(assets, _, owner) => settle: {
+            let key   = hashOf(owner, msg::sender);
+            let spend = ratio_shares_up(assets, m_total_supply, held);
+            m_allowances.update(key,
+                share_allowance_after_burn(m_allowances, owner,
+                                           msg::sender, spend))
+        }
+        in redeem(shares, _, owner) => settle: {
+            let key = hashOf(owner, msg::sender);
+            m_allowances.update(key,
+                share_allowance_after_burn(m_allowances, owner,
+                                           msg::sender, shares))
+        }
+    }
+}

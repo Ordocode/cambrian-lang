@@ -1,0 +1,25 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Vault: accepts pings only from its designated Guardian.
+// Uses 'from' clause for sender verification via AddressOf.
+
+entity Vault {
+
+    identity m_id: u64
+
+    routes {
+        constructor() => []
+        acceptPing(sender_pubkey: pubkey)
+            from Guardian(m_id) with {pubkey: sender_pubkey}
+            => []
+        getPingCount() -> u64 => [
+            return(m_ping_count)
+        ]
+    }
+
+    m_ping_count: u64 {
+        in constructor() => 0
+        in acceptPing(_) => m_ping_count + 1
+    }
+}

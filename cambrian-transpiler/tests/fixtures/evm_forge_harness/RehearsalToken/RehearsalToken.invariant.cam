@@ -1,0 +1,18 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// SPEC: INV-RHT-001 FixedTotalSupply
+invariant "INV-RHT-001 FixedTotalSupply" for RehearsalToken {
+    init { m_total_supply: 1000000000000000000000000 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action transfer(to: address, amount: U256) { }
+    action approve(spender: address, amount: U256) { }
+    action transferFrom(from_addr: address, to: address, amount: U256) { }
+
+    check totalSupply() == 1000000000000000000000000
+}

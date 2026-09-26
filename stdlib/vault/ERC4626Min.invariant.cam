@@ -1,0 +1,95 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Stateful invariants for ERC4626Min.
+//
+// Both are written in the multi-entity form with the token declared first, so
+// the vault's identity can be pinned at the token instance (`init vlt {
+// m_asset: tok }`) rather than at a literal address. That distinction is the
+// difference between an invariant and a formality: a literal address holds no
+// code, the first `balanceOf(sys::address) ~> m_asset` read reverts, every
+// action is skipped under `fail_on_revert: false`, and the checks pass over a
+// contract nothing ever touched.
+//
+// What the invariant harness cannot do is fund the caller. Instances are
+// deployed by the harness, their mappings cannot be seeded, and the token's
+// `mint` is gated on a minter whose address is not knowable at authoring
+// time — so the fuzzer holds no asset and no approval. Rather than pretend
+// otherwise, the first invariant makes that the claim: with no assets
+// anywhere, no sequence of vault calls may bring a share into existence. The
+// deposit and mint actions are in the action set precisely so that they are
+// driven and must fail without leaving anything behind.
+
+// The share supply is created by exactly two routes and destroyed by two
+// others, and all four are gated behind an asset movement. A fuzzer with no
+// assets and no approval therefore cannot move the supply off zero, no matter
+// how it interleaves the calls. An implementation that credited the shares
+// before the pull — or that ignored the asset's `false` — would break this on
+// the first draw, which is the reason to state it rather than assume it.
+invariant "no share exists without an asset" for { tok: ERC20Multi, vlt: ERC4626Min } {
+    init tok { m_token_id: 0, m_total_supply: 1000000 }
+    init vlt { m_asset: tok }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000d01,
+        0x0000000000000000000000000000000000000000000000000000000000000d02
+    }
+
+    action vlt.deposit(assets: U256, receiver: address) {
+        bound assets in 0..1000000
+    }
+    action vlt.mint(shares: U256, receiver: address) {
+        bound shares in 0..1000000
+    }
+    action vlt.withdraw(assets: U256, receiver: address, owner: address) {
+        bound assets in 0..1000000
+    }
+    action vlt.redeem(shares: U256, receiver: address, owner: address) {
+        bound shares in 0..1000000
+    }
+    action vlt.transfer(to: address, amount: U256) {
+        bound amount in 0..1000000
+    }
+    action vlt.approve(spender: address, amount: U256) {
+        bound amount in 0..1000000
+    }
+
+    check vlt.m_total_supply == 0
+}
+
+// The asset is an identity: it participates in the address derivation, so a
+// route that moved it would be answering for a vault that could not exist at
+// that address. Nothing in the entity writes it, and this is the check that
+// keeps it that way — the token's own supply is driven alongside so the
+// sequence is not a no-op.
+invariant "the vault never repoints at another asset" for { tok: ERC20Multi, vlt: ERC4626Min } {
+    init tok { m_token_id: 0, m_total_supply: 500 }
+    init vlt { m_asset: tok }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000d01
+    }
+
+    action vlt.approve(spender: address, amount: U256) {
+        bound amount in 0..1000
+    }
+    action vlt.transfer(to: address, amount: U256) {
+        bound amount in 0..1000
+    }
+    action tok.transfer(to: address, amount: U256) {
+        bound amount in 0..1000
+    }
+    action vlt.deposit(assets: U256, receiver: address) {
+        bound assets in 0..1000
+    }
+
+    // A check reads members, and no member of the token holds its own
+    // address, so the comparison this would like to make — `m_asset` is still
+    // that instance — is not expressible. What is expressible is that it is
+    // still an address with a token behind it, which is the part a bug would
+    // break: a route that wrote `m_asset` would write a caller-supplied value
+    // or clear it, and the deposit driven alongside would then stop reverting
+    // for the reason it reverts now.
+    check vlt.m_asset != 0x0000000000000000000000000000000000000000000000000000000000000000
+    check tok.m_total_supply == 500
+}

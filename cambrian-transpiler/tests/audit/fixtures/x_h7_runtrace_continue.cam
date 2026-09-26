@@ -1,0 +1,33 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-007 / LEAN-H9 differential: with `fail_on_revert: false`, EVM invariant traces
+// continue after a reverted action; Lean `runTrace` short-circuits on `.error`.
+
+entity TraceCont {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        fail(amount: u64) where amount <= m_count : throw 1 => []
+
+        inc() => []
+    }
+
+    m_count: u64 {
+        in create() => 0
+        in fail(amount) => m_count - amount
+        in inc() => m_count + 1
+    }
+}
+
+invariant "trace continues after revert" for TraceCont {
+    init { m_count: 10 }
+
+    action fail(amount: u64) {
+        bound amount in 100..200
+    }
+    action inc() { }
+
+    check m_count >= 0
+}

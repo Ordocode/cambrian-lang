@@ -1,0 +1,31 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: governor
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - ERC20Votes.cam
+  - ERC20Votes.test.cam
+  - ERC20Votes.fuzz.cam
+  - ERC20Votes.invariant.cam
+  - TimelockController.cam
+  - TimelockController.test.cam
+  - TimelockController.invariant.cam
+  - Governor.cam
+  - Governor.test.cam
+  - Governor.fuzz.cam
+  - Governor.invariant.cam
+
+fuzz:
+  runs: 64
+  seed: 1
+  shrink: true
+  max_local_rejects: 4096
+
+invariant:
+  runs: 16
+  depth: 16
+  fail_on_revert: false
+  seed: 1

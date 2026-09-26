@@ -1,0 +1,14 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-STD-KA-001 / PM-040: unsupported stdlib on Native must not emit runtime panic.
+
+entity E {
+    routes {
+        go(s: string) -> string => [
+            return(std::str::split(s, ","))
+        ]
+    }
+
+    m_x: u64 {}
+}

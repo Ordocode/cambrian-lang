@@ -1,0 +1,20 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// SD-01: fold-over-HashMap in invariant check (INV-CORE-002 class).
+entity Tiny {
+    routes {
+        #[factory_only]
+        constructor() => []
+        view totalSupply() -> u128 => [ return(m_supply) ]
+    }
+    m_supply: u128 { in constructor() => 1000 }
+    m_bal: HashMap<address, u128> {
+        in constructor() => HashMap::new()
+    }
+}
+
+invariant "balance supply" for Tiny {
+    action constructor() { }
+    check m_bal.keys().fold(0, |acc, k| acc + m_bal[k]) == totalSupply()
+}

@@ -1,0 +1,19 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-S-001 / PW3-O-003: Option<u64> packs with trailing u64 (solc offset 0 + 8).
+
+entity OptU64 {
+    routes {
+        #[factory_only]
+        constructor() => []
+    }
+
+    m_t: Option<u64> {
+        in constructor() => none
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+    }
+}

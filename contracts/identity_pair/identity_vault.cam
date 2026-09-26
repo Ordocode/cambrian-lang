@@ -1,0 +1,27 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Identity Vault: demonstrates identity fields.
+// m_id is an identity member (affects address, set at deploy via genaddr --data).
+// initial_balance is a regular constructor param (passed in deploy message).
+
+entity IdentityVault {
+
+    routes {
+        constructor(initial_balance: u64) => []
+        deposit(amount: u64) => []
+        getBalance() -> u64 => [
+            return(m_balance)
+        ]
+        getId() -> u64 => [
+            return(m_id)
+        ]
+    }
+
+    identity m_id: u64
+
+    m_balance: u64 {
+        in constructor(initial_balance) => initial_balance
+        in deposit(amount) => m_balance + amount
+    }
+}

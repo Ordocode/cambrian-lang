@@ -1,0 +1,497 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Unit tests for the uRWA permission layer.
+//
+// One test per scenario of `product/stdlib/bls/erc7943-min.md`, plus a test
+// per throw code. Where the BLS scenario names a postcondition that only a
+// quantified claim can carry ("rejects *each* nonzero transfer"), the unit
+// test pins one witness and the fuzz suite carries the quantifier.
+//
+// Constructor argument order throughout:
+//   (operator, initial_holder, initial_supply)
+
+// ── S01: freeze the complete balance ────────────────────────────────────
+
+test "freezing the whole balance stops every standard transfer" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 1000)
+
+    call getFrozenTokens(alice)
+    expect return 1000
+    call unfrozenTokens(alice)
+    expect return 0
+    call canTransfer(alice, bob, 1)
+    expect return false
+
+    msg { sender: alice }
+    call transfer(bob, 1)
+    expect throw 10
+}
+
+// ── S02: freeze part of one balance ─────────────────────────────────────
+
+test "a partial freeze admits the unfrozen amount and no more" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 600)
+
+    call unfrozenTokens(alice)
+    expect return 400
+    call canTransfer(alice, bob, 400)
+    expect return true
+    call canTransfer(alice, bob, 401)
+    expect return false
+
+    msg { sender: alice }
+    call transfer(bob, 400)
+    call balanceOf(bob)
+    expect return 400
+}
+
+test "a transfer one above the unfrozen amount throws 10" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 600)
+    msg { sender: alice }
+    call transfer(bob, 401)
+    expect throw 10
+}
+
+// ── S03 / S06: the check and the route agree ────────────────────────────
+//
+// The converse direction is the one worth pinning by hand. A contract that
+// reverts every transfer satisfies "a rejected transfer reverts" for free, so
+// the claim only means something alongside a transfer the check accepts and
+// the route completes.
+
+test "an accepted transfer completes" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    call canTransfer(alice, bob, 250)
+    expect return true
+
+    msg { sender: alice }
+    call transfer(bob, 250)
+    call balanceOf(alice)
+    expect return 750
+    call balanceOf(bob)
+    expect return 250
+}
+
+test "the transfer check writes nothing" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    call canTransfer(alice, bob, 250)
+    call canSend(alice)
+    call canReceive(bob)
+    expect state { m_total_supply: 1000 }
+    call balanceOf(alice)
+    expect return 1000
+}
+
+// ── S04: forced transfer ────────────────────────────────────────────────
+
+test "the operator seizes against the check" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 1000)
+    msg { sender: op }
+    call setSendBlocked(alice, true)
+
+    call canTransfer(alice, bob, 300)
+    expect return false
+
+    msg { sender: op }
+    call forcedTransfer(alice, bob, 300)
+
+    call balanceOf(alice)
+    expect return 700
+    call balanceOf(bob)
+    expect return 300
+    call totalSupply()
+    expect return 1000
+}
+
+// ── S05: the caller check on each rule route ────────────────────────────
+
+test "a stranger cannot seize" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: bob }
+    call forcedTransfer(alice, bob, 300)
+    expect throw 6
+}
+
+test "a stranger cannot freeze" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: bob }
+    call setFrozenTokens(alice, 500)
+    expect throw 6
+}
+
+test "a stranger cannot move the account checks" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: bob }
+    call setSendBlocked(alice, true)
+    expect throw 6
+}
+
+// ── S07: unfreeze ───────────────────────────────────────────────────────
+
+test "unfreezing restores the whole balance" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 0)
+
+    call getFrozenTokens(alice)
+    expect return 0
+    call unfrozenTokens(alice)
+    expect return 1000
+    call canTransfer(alice, bob, 1000)
+    expect return true
+}
+
+// ── S08: the sender check ───────────────────────────────────────────────
+
+test "a blocked sender cannot transfer" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setSendBlocked(alice, true)
+
+    call canSend(alice)
+    expect return false
+    call canTransfer(alice, bob, 1)
+    expect return false
+
+    msg { sender: alice }
+    call transfer(bob, 1)
+    expect throw 8
+}
+
+// An allowance delegates the holder's permission and does not launder it.
+// This is the bypass an implementation gets wrong by checking `msg::sender`
+// in `transferFrom` instead of `from_addr`.
+test "a blocked holder cannot transfer through a spender" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol = 0x0000000000000000000000000000000000000000000000000000000000000a03
+
+    call constructor(op, alice, 1000)
+    msg { sender: alice }
+    call approve(bob, 500)
+    msg { sender: op }
+    call setSendBlocked(alice, true)
+
+    msg { sender: bob }
+    call transferFrom(alice, carol, 100)
+    expect throw 8
+}
+
+test "a blocked sender cannot burn" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setSendBlocked(alice, true)
+
+    msg { sender: alice }
+    call burn(100)
+    expect throw 8
+}
+
+// ── S09: the recipient check ────────────────────────────────────────────
+
+test "a blocked recipient cannot be paid" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setReceiveBlocked(bob, true)
+
+    call canReceive(bob)
+    expect return false
+    call canSend(bob)
+    expect return true
+    call canTransfer(alice, bob, 1)
+    expect return false
+
+    msg { sender: alice }
+    call transfer(bob, 1)
+    expect throw 9
+}
+
+// The one-way restriction the standard's two separate checks exist for: an
+// address barred from receiving keeps the right to pay out what it holds.
+test "a blocked recipient may still send" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, bob, 1000)
+    msg { sender: op }
+    call setReceiveBlocked(bob, true)
+
+    msg { sender: bob }
+    call transfer(alice, 400)
+    call balanceOf(alice)
+    expect return 400
+}
+
+// ── S10: burn under a freeze ────────────────────────────────────────────
+//
+// Without this the freeze is a control in name only: the withheld amount is
+// unreachable by transfer and destroyable by the holder, so the claimant the
+// operator froze it for ends up with nothing rather than with a claim.
+
+test "a burn above the unfrozen amount throws 10" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 600)
+
+    msg { sender: alice }
+    call burn(401)
+    expect throw 10
+
+    call balanceOf(alice)
+    expect return 1000
+    call totalSupply()
+    expect return 1000
+}
+
+test "a burn within the unfrozen amount succeeds" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 600)
+
+    msg { sender: alice }
+    call burn(400)
+
+    call balanceOf(alice)
+    expect return 600
+    call totalSupply()
+    expect return 600
+    call getFrozenTokens(alice)
+    expect return 600
+}
+
+// ── S11: a freeze above the balance ─────────────────────────────────────
+//
+// ERC-7943 requires this to be accepted: the operator withholds a sum before
+// the address holds it, so an incoming amount arrives already frozen.
+
+test "the operator may freeze above the balance" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 5000)
+
+    call getFrozenTokens(alice)
+    expect return 5000
+    call unfrozenTokens(alice)
+    expect return 0
+    call canTransfer(alice, bob, 1)
+    expect return false
+}
+
+test "an amount arriving under a saturated freeze stays withheld" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, bob, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 300)
+
+    msg { sender: bob }
+    call transfer(alice, 200)
+
+    call balanceOf(alice)
+    expect return 200
+    call unfrozenTokens(alice)
+    expect return 0
+
+    msg { sender: bob }
+    call transfer(alice, 200)
+    call unfrozenTokens(alice)
+    expect return 100
+}
+
+// ── The base guards this layer inherits ─────────────────────────────────
+
+test "minting is the operator's route" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor(op, alice, 1000)
+    msg { sender: alice }
+    call mint(alice, 100)
+    expect throw 6
+}
+
+// ERC-7943 requires a permissionless mint to respect the recipient check, and
+// a permissioned one to respect it too unless the operator has a reason not
+// to. This entity has no such reason, so it always respects it.
+test "minting to a blocked recipient throws 9" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor(op, alice, 1000)
+    msg { sender: op }
+    call setReceiveBlocked(alice, true)
+    msg { sender: op }
+    call mint(alice, 100)
+    expect throw 9
+}
+
+test "a transfer to the zero address throws 7" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let zero  = 0x0000000000000000000000000000000000000000000000000000000000000000
+
+    call constructor(op, alice, 1000)
+    msg { sender: alice }
+    call transfer(zero, 100)
+    expect throw 7
+}
+
+// The balance guard is unreachable in this route and the code below says so.
+// `unfrozen` is `balance - frozen` clamped at zero, so it is never above the
+// balance, and an amount that clears the unfrozen check has already cleared
+// the balance. A transfer of more than the holder owns therefore reports the
+// unfrozen-amount code, which is also the more useful diagnosis: it names the
+// number the caller has to respect rather than the one it happens to exceed.
+test "a transfer above the balance reports the unfrozen amount" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(op, alice, 1000)
+    msg { sender: alice }
+    call transfer(bob, 1001)
+    expect throw 10
+}
+
+test "a spend above the allowance throws 3" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol = 0x0000000000000000000000000000000000000000000000000000000000000a03
+
+    call constructor(op, alice, 1000)
+    msg { sender: alice }
+    call approve(bob, 50)
+    msg { sender: bob }
+    call transferFrom(alice, carol, 100)
+    expect throw 3
+}
+
+// ERC-165, and the ABI claim it makes.
+//
+// `0x3edbb4c4` is the XOR of the six fungible-interface selectors the EIP
+// lists. Asserting it here is not ceremony: the id is derived from argument
+// lists, so renaming a parameter type on any of the six routes silently moves
+// it, and a consumer that trusted the answer would call a function that no
+// longer exists. This test turns that into a build failure.
+//
+// The negative case matters as much: a route that answers `true` to every id
+// passes the positive assertion and tells a caller nothing.
+test "the entity answers for the interfaces it implements" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    call constructor(op, alice, 1000)
+
+    call supportsInterface(0x01ffc9a7)
+    expect return true
+    call supportsInterface(0x3edbb4c4)
+    expect return true
+    call supportsInterface(0xffffffff)
+    expect return false
+    call supportsInterface(0xdeadbeef)
+    expect return false
+}
+
+// The rule routes the EIP declares as `returns (bool)`.
+test "the rule routes answer true" for ERC7943Min {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    call constructor(op, alice, 1000)
+
+    msg { sender: op }
+    call setFrozenTokens(alice, 100)
+    expect return true
+
+    msg { sender: op }
+    call forcedTransfer(alice, bob, 50)
+    expect return true
+
+    msg { sender: alice }
+    call transfer(bob, 10)
+    expect return true
+
+    msg { sender: alice }
+    call approve(bob, 10)
+    expect return true
+
+    msg { sender: bob }
+    call transferFrom(alice, bob, 10)
+    expect return true
+}

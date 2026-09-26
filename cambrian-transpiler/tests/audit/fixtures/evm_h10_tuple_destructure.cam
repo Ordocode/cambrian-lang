@@ -1,0 +1,31 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H10: tuple destructure in a member transform
+// lowers via `val[i]` uint256 slots instead of Solidity tuple destructure.
+
+entity TupleTransform {
+    routes {
+        #[factory_only]
+        constructor() => []
+        split() => []
+        getQ() -> U256 => [ return(m_q) ]
+        getR() -> U256 => [ return(m_r) ]
+    }
+
+    m_q: U256 {
+        in constructor() => 0
+        in split() => {
+            let (q, r) = std::math::divmod(100, 7);
+            q
+        }
+    }
+
+    m_r: U256 {
+        in constructor() => 0
+        in split() => {
+            let (q, r) = std::math::divmod(100, 7);
+            r
+        }
+    }
+}

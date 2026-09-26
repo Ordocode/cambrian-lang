@@ -1,0 +1,27 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-036 / H-AX-02-01: phased route body — EVM emits per-phase blocks;
+// Lean lowers the whole route as one atomic `WorldState` step.
+
+entity SnapProbe {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        bump() => [
+            prep: []
+            inc: []
+        ]
+    }
+
+    m_x: u64 {
+        in constructor() => 10
+        in bump() => inc: m_x + 1
+    }
+}
+
+test "increment once" for SnapProbe {
+    call bump()
+    expect state { m_x: 11 }
+}

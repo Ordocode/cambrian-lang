@@ -1,0 +1,14 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity Peer {
+    routes {
+        constructor(owner: address, initial_supply: U256) => []
+    }
+
+    identity m_id: U256
+
+    m_supply: U256 {
+        in constructor(_, supply) => supply
+    }
+}

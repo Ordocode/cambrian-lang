@@ -1,0 +1,22 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-025 / H-AX-08-03: multiple `from` with distinct `: throw N` — Lean emits
+// first code only; EVM falls back to generic `"from clause failed"`.
+
+entity DualFromProbe {
+    routes {
+        #[factory_only]
+        constructor(alice: address, bob: address) => []
+
+        gate() from m_alice : throw 2 | m_bob : throw 3 => []
+    }
+
+    m_alice: address {
+        in constructor(alice, bob) => alice
+    }
+
+    m_bob: address {
+        in constructor(alice, bob) => bob
+    }
+}

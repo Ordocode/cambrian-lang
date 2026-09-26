@@ -1,0 +1,280 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Cambrian standard library — integer math.
+//
+// ## This file and the built-in `std::math` both stay
+//
+// The transpiler ships a built-in `std::math` (`min`, `max`, `clamp`, `abs`,
+// `sign`, `divmod`, `divc`, `divr`, `minmax`, `modpow2`, `pow`, `muldiv`,
+// `muldivmod`). Prefer the built-in wherever it is equivalent — it lowers to
+// the obvious Solidity and costs nothing. Two things here are NOT equivalent
+// and must not be "simplified" away into it:
+//
+//   - **`sqrt` has no upstream counterpart at all.** There is no
+//     `std::math::sqrt`; deleting this one deletes the only integer square
+//     root in the language.
+//   - **`mul_div` is wider than `std::math::muldiv`.** Ours computes
+//     `⌊a·b/c⌋` over an exact 512-bit intermediate; the built-in lowers to
+//     `(a * b) / c` and reverts whenever `a·b ≥ 2²⁵⁶` even when the quotient
+//     is representable. That width is the entire point: it is what the
+//     AMM-overflow property was written against, and routing those call sites
+//     through the built-in — which would also infer the narrower operand type
+//     — silently reintroduces the defect the property exists to catch.
+//
+// The rest of the "deliberately NOT here" reasoning is below.
+//
+// Library tier: declarations only, no entity, so this file is importable
+// (packaging diagnostic F4). A project adopts it by vendoring the file into
+// `cambrian-contracts/std/` and writing `import "./std/math.cam"`.
+//
+// Every function here is characterized in `product/src/stdlib-catalog.ts` and
+// audited against that characterization to the type ceiling, and the emitted
+// Solidity is differentially fuzzed against OpenZeppelin `Math.mulDiv` in
+// `product/stdlib/foundry/`. Nothing in this file may be changed without
+// re-running both.
+//
+// ## What is deliberately NOT here
+//
+// `min`, `max`, `clamp`, `divc` and `divr` are transpiler built-ins that
+// already lower to the obvious correct Solidity, and a user `pure fn` of the
+// same name *shadows* the built-in program-wide. Redefining them here would
+// gain nothing and would collide with any project that already declares one —
+// `examples/uniswap-v2/UniswapV2Pair.cam` declares `min`, so importing a
+// stdlib `min` into it is a duplicate-name error at load time. Use the
+// built-ins.
+//
+// The built-in `muldiv` is a different matter and the reason `mul_div` exists:
+// it lowers to `(a * b) / d`, which reverts whenever `a·b ≥ 2²⁵⁶` even when
+// the quotient is perfectly representable. That is the classic AMM defect,
+// and `CAMBRIAN_REFERENCE.md` used to describe the built-in as overflow-free.
+
+// ── Machine constants ────────────────────────────────────────────────
+//
+// Neither can simply be written down. A decimal literal above `u128::MAX`
+// panics the transpiler rather than producing a diagnostic, and a hex literal
+// is typed `bytes32`, which then propagates through `&` and `*` and breaks
+// every later arithmetic operation on the value. So `2^128` is assembled from
+// `2^127`, which fits, and `2^256 − 1` is `(2^128)·(2^128 − 1) + (2^128 − 1)`,
+// which is exact and never overflows on the way. `const` is not a top-level
+// form — the parser admits it only inside an `entity` or a `library` — so
+// these are nullary `pure fn`s, which inline away.
+
+pure fn two_128() -> U256 { 170141183460469231731687303715884105728 * 2 }
+
+pure fn u256_max() -> U256 {
+    let t = two_128();
+    t * (t - 1) + (t - 1)
+}
+
+// ── Wrapping arithmetic ──────────────────────────────────────────────
+//
+// Cambrian has `+%`, `-%` and `*%`, and on the EVM target they are unusable
+// from here: the backend funnels them through `_wadd` / `_wsub` / `_wmul`
+// helpers that it emits *inside the contract*, and it decides whether to emit
+// them by scanning entity routes and members only. A free `pure fn` using `+%`
+// therefore compiles to a call to a function that is both undeclared and, were
+// it declared, out of scope. Reproduced against the shipped transpiler; until
+// it is fixed upstream, wrapping arithmetic in an importable file has to be
+// spelled out.
+//
+// These three are exact: each computes the true result modulo 2^256 using only
+// checked operations, detecting every carry and borrow by comparison before it
+// would occur rather than after it has been lost.
+
+pure fn wadd(a: U256, b: U256) -> U256 {
+    let headroom = u256_max() - b;
+    if a > headroom { a - headroom - 1 } else { a + b }
+}
+
+pure fn wsub(a: U256, b: U256) -> U256 {
+    if a >= b { a - b } else { u256_max() - (b - a) + 1 }
+}
+
+// Low 256 bits of `a·b`.
+//
+// Only the low half of the middle limb survives the reduction modulo 2^256,
+// and it is reduced *before* being scaled, so no intermediate exceeds the
+// type: each limb product is below 2^256 by construction, and `mid · 2^128`
+// is below 2^256 because `mid < 2^128`.
+pure fn wmul(a: U256, b: U256) -> U256 {
+    let t = two_128();
+    let a0 = a % t;
+    let a1 = a / t;
+    let b0 = b % t;
+    let b1 = b / t;
+    let mid = ((a0 * b1) % t + (a1 * b0) % t) % t;
+    wadd(a0 * b0, mid * t)
+}
+
+// ── Integer square root ──────────────────────────────────────────────
+//
+// Returns the unique r with `r·r ≤ y < (r+1)·(r+1)`.
+//
+// Both features carry the correctness. The bound is 256 because the descent
+// from a seed of `y` only halves per step until it nears the root, so a U256
+// radicand can need ~128 steps before the quadratic phase begins — a body
+// that iterates 50 times is wrong above roughly 2^92 and looks right on every
+// worked example. The trailing correction turns a possible overshoot by one
+// into the floor, which is what makes the result satisfy the characterization
+// rather than merely approach it.
+
+pure fn sqrt(y: U256) -> U256 {
+    let r_final = (0..256).fold(y / 2 + 1, |r, _| {
+        if r == 0 { 1 } else {
+            let r_next = (r + y / r) / 2;
+            if r_next >= r { r } else { r_next }
+        }
+    });
+    if y == 0 { 0 } else {
+        if r_final > y / r_final { r_final - 1 } else { r_final }
+    }
+}
+
+// ── Full-precision multiply-divide ───────────────────────────────────
+//
+// `mul_div(a, b, c)` is `⌊a·b/c⌋` computed over the exact 512-bit product, so
+// it is defined for every triple whose quotient fits in a U256 — including
+// the ones where `a·b` does not.
+//
+// Throws 0x12 on `c == 0` and 0x11 when the quotient itself overflows, which
+// are the Solidity panic codes for division by zero and arithmetic overflow.
+//
+// ## Why this shape and not OpenZeppelin's
+//
+// The algorithm is Remco Bloemen's, as carried by OpenZeppelin `Math.mulDiv`:
+// take the product modulo the denominator, subtract it to make the 512-bit
+// numerator exactly divisible, factor out the denominator's power of two, and
+// multiply by the modular inverse of what remains. Two adaptations were forced
+// by the toolchain, and both were established by transpiling rather than
+// assumed:
+//
+//   - **No `mulmod`.** Cambrian exposes no `mulmod` intrinsic, so the
+//     remainder comes from a 512-step binary reduction. It runs only on the
+//     wide path.
+//   - **`fold` accumulators must be scalar.** A record or tuple accumulator
+//     emits Solidity that assigns a struct to a `uint256`, and a `fold` used
+//     as a subexpression rather than bound by `let` silently emits
+//     `return 0`. That is why the reduction carries only the running
+//     remainder, and why the quotient is recovered algebraically instead of
+//     being accumulated beside it in one loop.
+//
+// ## How a pure fn rejects its input
+//
+// It cannot do so directly. `where ... : throw` is admitted by the grammar on
+// routes and members but not on `pure fn` — LANGUAGE.md shows it on a library
+// `pure fn` and the parser rejects that — and `throw` is a route action. The
+// only exit a pure body has is a checked-arithmetic trap, so `mul_div_reject`
+// performs one deliberately, picking the operation whose panic code matches
+// the condition. A caller sees exactly the panic a narrower implementation
+// would have produced.
+
+// High 256 bits of `a·b`, by 128-bit limbs. The low word is `wmul`.
+pure fn mul_hi(a: U256, b: U256) -> U256 {
+    let t = two_128();
+    let umax = u256_max();
+    let a0 = a % t;
+    let a1 = a / t;
+    let b0 = b % t;
+    let b1 = b / t;
+    let p00 = a0 * b0;
+    let p01 = a0 * b1;
+    let p10 = a1 * b0;
+    let p11 = a1 * b1;
+    let mid_carry = if p10 > umax - p01 { 1 } else { 0 };
+    let mid = wadd(p01, p10);
+    let mid_lo_shifted = (mid % t) * t;
+    let lo_carry = if mid_lo_shifted > umax - p00 { 1 } else { 0 };
+    p11 + (mid / t) + (mid_carry * t) + lo_carry
+}
+
+// `(a·b) mod c`, over the exact 512-bit product.
+//
+// Binary reduction, most-significant bit first. The invariant is `rem < c` at
+// the top of every step, so the doubled value is below `2c` and one
+// conditional subtraction restores it. Doubling can carry out of 256 bits;
+// `carry` captures that bit before it is lost, and in that case the true value
+// exceeds 2^256, so the subtraction is unconditional and wraps back into
+// range.
+pure fn mulmod_512(a: U256, b: U256, c: U256) -> U256 {
+    let hi = mul_hi(a, b);
+    let lo = wmul(a, b);
+    (0..512).fold(0, |rem, i| {
+        let shift = 511 - i;
+        let bit = if shift >= 256 { (hi >> (shift - 256)) & 1 } else { (lo >> shift) & 1 };
+        let carry = rem >> 255;
+        let doubled = wadd(rem, rem) + bit;
+        if carry == 1 { wsub(doubled, c) } else {
+            if doubled >= c { doubled - c } else { doubled }
+        }
+    })
+}
+
+// Rejects an input `mul_div` cannot answer, by trapping.
+//
+// Reached exactly when `mul_hi(a, b) >= c`, which covers both failures:
+// `c == 0` (nothing is below zero) and a quotient of 2^256 or more.
+pure fn mul_div_reject(hi: U256, c: U256) -> U256 {
+    // `hi / c` panics 0x12; on the other branch `hi >= c >= 1`, so adding
+    // U256_MAX panics 0x11.
+    if c == 0 { hi / c } else { hi + u256_max() }
+}
+
+// The multiplicative inverse of an odd `d` modulo 2^256.
+//
+// Newton's iteration. The seed is correct to 4 bits and each step doubles
+// that, so six steps reach 256 and a seventh would be wasted work. Kept as
+// its own function because inlining it alongside the rest of the wide path
+// exhausts Solidity's stack under the default (non-IR) pipeline.
+pure fn inv_mod_2_256(d: U256) -> U256 {
+    let inv0 = wmul(3, d) ^ 2;
+    let inv1 = wmul(inv0, wsub(2, wmul(d, inv0)));
+    let inv2 = wmul(inv1, wsub(2, wmul(d, inv1)));
+    let inv3 = wmul(inv2, wsub(2, wmul(d, inv2)));
+    let inv4 = wmul(inv3, wsub(2, wmul(d, inv3)));
+    let inv5 = wmul(inv4, wsub(2, wmul(d, inv4)));
+    wmul(inv5, wsub(2, wmul(d, inv5)))
+}
+
+// The wide path: `hi != 0`, so the product genuinely exceeds 256 bits.
+//
+// Takes the 512-bit numerator `[hi lo]` already reduced to a multiple of `c`.
+pure fn mul_div_wide(n1: U256, n0: U256, c: U256) -> U256 {
+    // Factor the denominator's power of two out of both, so what remains is
+    // odd and therefore invertible modulo 2^256.
+    let twos = c & wsub(0, c);
+    // 2^256 / twos, as a wrapped U256: exactly the multiplier that moves n1's
+    // surviving bits down into n0. When twos is 1 this is 0, which is correct
+    // — there is nothing above the low word left to move.
+    let carry_mul = wadd(wsub(0, twos) / twos, 1);
+    let numerator = (n0 / twos) | wmul(n1, carry_mul);
+    wmul(numerator, inv_mod_2_256(c / twos))
+}
+
+// The answer, for operands already known to admit one: `c > mul_hi(a, b)`,
+// hence `c != 0` and the quotient is below 2^256.
+pure fn mul_div_checked(a: U256, b: U256, c: U256, hi: U256) -> U256 {
+    let lo = wmul(a, b);
+    if hi == 0 { lo / c } else {
+        // Subtract the remainder so the numerator divides `c` exactly.
+        let rem = mulmod_512(a, b, c);
+        let borrow = if rem > lo { 1 } else { 0 };
+        mul_div_wide(hi - borrow, wsub(lo, rem), c)
+    }
+}
+
+// `⌊a·b/c⌋` over the exact 512-bit product.
+pure fn mul_div(a: U256, b: U256, c: U256) -> U256 {
+    let hi = mul_hi(a, b);
+    if hi < c { mul_div_checked(a, b, c, hi) } else { mul_div_reject(hi, c) }
+}
+
+// `⌈a·b/c⌉` over the exact 512-bit product.
+//
+// The rounding step is a checked add, so a ceiling that leaves the type
+// reverts rather than wrapping to zero.
+pure fn mul_div_up(a: U256, b: U256, c: U256) -> U256 {
+    let q = mul_div(a, b, c);
+    let r = if mul_hi(a, b) == 0 { wmul(a, b) % c } else { mulmod_512(a, b, c) };
+    if r == 0 { q } else { q + 1 }
+}

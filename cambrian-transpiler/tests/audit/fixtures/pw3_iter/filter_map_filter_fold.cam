@@ -1,0 +1,26 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-S-015 row 3: chain beyond T-F-004 `filter().map().fold()` — filter.map.filter.fold.
+
+pure fn deep_sum(xs: Vec<u64>) -> u64 {
+    xs.filter(|x| *x > 0)
+        .map(|x| x * 2)
+        .filter(|x| *x < 100)
+        .fold(0, |acc, x| acc + x)
+}
+
+entity DeepFold {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        run(xs: Vec<u64>) -> u64 => [
+            return(deep_sum(xs))
+        ]
+    }
+
+    m_n: u64 {
+        in constructor() => 0
+    }
+}

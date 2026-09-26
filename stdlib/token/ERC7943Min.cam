@@ -1,0 +1,337 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// ERC7943Min — the uRWA permission layer, and nothing else.
+//
+// This entity is the executable form of `product/stdlib/bls/erc7943-min.md`.
+// It carries the six ERC-7943 rule routes over the smallest base token that
+// can hold them, and its suite proves permission claims only: who may move
+// value, and when a route reverts. Not one property below is about how much
+// a balance changed.
+//
+// ## Why a separate entity from `ERC7943`
+//
+// The two documents split on what an adopter is allowed to rely on. A caller
+// of this entity learns that a frozen holder cannot transfer and that only
+// the operator may seize — claims that survive a rebasing or fee-charging
+// base, because they are about control flow. A caller of `ERC7943` learns in
+// addition that the recipient receives exactly `amount` and that the balances
+// sum to the emission, which a fee base falsifies. Keeping the layers apart
+// means the weaker claim can be adopted over a base the stronger one would
+// reject, instead of every integrator inheriting arithmetic they do not have.
+//
+// ## What it implements
+//
+//   - ERC-7943 fungible: forcedTransfer, setFrozenTokens, canSend, canReceive,
+//     canTransfer, getFrozenTokens, plus setSendBlocked / setReceiveBlocked
+//     as the operator's way to move the two account checks.
+//   - A minimal ERC-20 base: transfer, transferFrom, approve, mint, burn and
+//     the four views. No permit, no metadata — `ERC7943` carries those.
+//
+// ## Throw codes
+//
+//   1  zero amount
+//   2  insufficient balance (`forcedTransfer` only — see below)
+//   3  insufficient allowance
+//   6  caller is not the operator
+//   7  zero address as transfer recipient or approval spender
+//   8  the sender check rejects the sender
+//   9  the recipient check rejects the recipient
+//  10  the amount is above the unfrozen amount of the sender
+//
+// Code 2 appears only in `forcedTransfer`. Everywhere else the unfrozen check
+// subsumes it: `unfrozen` is `balance - frozen` clamped at zero, so it never
+// exceeds the balance, and an amount that clears the unfrozen check has
+// already cleared the balance. Carrying both guards would leave one of them
+// unreachable, which reads as a safety net and is not one. `forcedTransfer`
+// skips the unfrozen check by design, so there the balance guard is the only
+// thing standing between the operator and value that does not exist.
+//
+// Codes 1, 2, 3, 6 and 7 keep the meanings they carry in `ERC20.cam`, so a
+// reader moving between the two entities does not have to relearn them.
+// ERC-7943 names four errors of its own; the three added here map onto
+// `ERC7943CannotSend`, `ERC7943CannotReceive` and
+// `ERC7943InsufficientUnfrozenBalance`. `ERC7943CannotTransfer` has no code
+// because `canTransfer` is the conjunction of the other three, so a rejected
+// transfer always has a more specific cause — which is the specificity the
+// standard asks for.
+//
+// ## Deviations worth knowing before adoption
+//
+//   - The write routes that the standard declares `bool` return `true` or
+//     revert, which is what every published implementation does. `mint`,
+//     `burn`, `setSendBlocked` and `setReceiveBlocked` answer nothing,
+//     because the standard declares no return for them either.
+//   - A zero-value transfer reverts (throw 1), inherited from `ERC20.cam`.
+//   - `forcedTransfer` bypasses the transfer check entirely, which the
+//     standard permits in a single-party context. It does not lower the
+//     frozen amount when it moves withheld value, so a seizure can leave an
+//     account whose frozen amount is above its balance. That is a legal
+//     state under this document — the frozen amount is allowed to exceed the
+//     balance — but it means the operator must re-freeze after a partial
+//     seizure to keep the two numbers meaning what they did before.
+
+import "./erc7943-core.cam"
+
+entity ERC7943Min {
+
+    // ERC-7943 requires both. A freeze or a seizure that emits nothing is
+    // invisible to every indexer, so the regulatory audit trail this entity
+    // exists to produce would live only in storage — and a compliance record
+    // that cannot be read off-chain is not a record.
+    event ForcedTransfer(indexed from_addr: address, indexed to: address, amount: U256);
+    event Frozen(indexed account: address, amount: U256);
+
+    // The base is an ERC-20, so it owes the ERC-20 log as well.
+    event Transfer(indexed from_addr: address, indexed to: address, value: U256);
+    event Approval(indexed owner: address, indexed spender: address, value: U256);
+
+    routes {
+        // `operator_` holds every rule route. The zero address permanently
+        // disables seizure and freezing, which is the right choice for a
+        // token that claims the interface for readability and never intends
+        // to enforce — the checks then answer honestly and no key can move
+        // value against a holder's will.
+        #[factory_only]
+        constructor(operator_: address,
+                    initial_holder: address, initial_supply: U256) => []
+
+        // ── The base token ──────────────────────────────────────────────
+        //
+        // Each standard transfer route runs the three rule checks before the
+        // balance guard. The order matters for the caller's diagnosis, not
+        // for correctness: a rejected sender learns that first rather than
+        // learning that the amount was also too large.
+        transfer(to: address, amount: U256) -> bool
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  send_allowed(m_send_blocked, msg::sender) : throw 8 &&
+                  receive_allowed(m_recv_blocked, to) : throw 9 &&
+                  amount <= unfrozen_of(m_frozen, m_balances, msg::sender) : throw 10
+        => [
+            emit Transfer(msg::sender, to, amount);
+            return(true)
+        ]
+
+        // The rule checks name `from_addr`, not the caller. An allowance is a
+        // delegation of the holder's own permission, so a blocked holder
+        // cannot escape the block by approving somebody who is not blocked.
+        transferFrom(from_addr: address, to: address, amount: U256) -> bool
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  send_allowed(m_send_blocked, from_addr) : throw 8 &&
+                  receive_allowed(m_recv_blocked, to) : throw 9 &&
+                  amount <= unfrozen_of(m_frozen, m_balances, from_addr) : throw 10 &&
+                  allowance_of(m_allowances, from_addr, msg::sender) >= amount : throw 3
+        => [
+            emit Transfer(from_addr, to, amount);
+            return(true)
+        ]
+
+        approve(spender: address, amount: U256) -> bool
+            where spender != zero_address() : throw 7
+        => [
+            emit Approval(msg::sender, spender, amount);
+            return(true)
+        ]
+
+        mint(to: address, amount: U256)
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  msg::sender == m_operator : throw 6 &&
+                  receive_allowed(m_recv_blocked, to) : throw 9
+        => [ emit Transfer(zero_address(), to, amount); ]
+
+        // Burning is a public route, so ERC-7943 puts it under the same two
+        // constraints as a transfer: the sender check and the unfrozen
+        // amount. Without them a freeze is a control in name only — the
+        // amount the operator withheld for a claimant is unreachable by
+        // transfer and destroyable by the holder, which is a worse outcome
+        // than no freeze at all.
+        burn(amount: U256)
+            where amount > 0 : throw 1 &&
+                  send_allowed(m_send_blocked, msg::sender) : throw 8 &&
+                  amount <= unfrozen_of(m_frozen, m_balances, msg::sender) : throw 10
+        => [ emit Transfer(msg::sender, zero_address(), amount); ]
+
+        // ── The rule routes ─────────────────────────────────────────────
+
+        // Seizure. Bypasses the transfer check, per the standard's
+        // single-party allowance, but keeps the balance guard: the operator
+        // may move value against the holder's will and may not conjure it.
+        forcedTransfer(from_addr: address, to: address, amount: U256) -> bool
+            where msg::sender == m_operator : throw 6 &&
+                  amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  balance_of(m_balances, from_addr) >= amount : throw 2
+        => [
+            emit ForcedTransfer(from_addr, to, amount);
+            emit Transfer(from_addr, to, amount);
+            return(true)
+        ]
+
+        // The frozen amount is written absolutely, not adjusted, and the
+        // standard requires an amount above the balance to be accepted.
+        setFrozenTokens(account: address, amount: U256) -> bool
+            where msg::sender == m_operator : throw 6
+        => [
+            emit Frozen(account, amount);
+            return(true)
+        ]
+
+        setSendBlocked(account: address, blocked: bool)
+            where msg::sender == m_operator : throw 6
+        => []
+
+        setReceiveBlocked(account: address, blocked: bool)
+            where msg::sender == m_operator : throw 6
+        => []
+
+        // ── The checks, as views ────────────────────────────────────────
+        //
+        // ERC-7943 requires all four to answer rather than revert, and to
+        // write nothing. Both hold by construction here: a Cambrian `view`
+        // declares no member transform, so there is no state for it to move.
+
+        // ERC-165. `0x01ffc9a7` is the introspection interface itself;
+        // `0x3edbb4c4` is the ERC-7943 fungible interface — the XOR of the
+        // selectors of `forcedTransfer`, `setFrozenTokens`, `canSend`,
+        // `canReceive`, `getFrozenTokens` and `canTransfer`, which is the
+        // value the EIP states and which this entity's six routes reproduce
+        // exactly. Answering `true` here is a claim about the ABI, so it stays
+        // honest only while those six signatures do: change an argument list
+        // and the claim becomes a lie the caller has no way to detect.
+        //
+        // The parameter is `bytes4` and nothing else. A `u32` or a `bytes32`
+        // in this position yields a different selector, so a caller making the
+        // standard `supportsInterface(0x01ffc9a7)` staticcall reaches no
+        // function at all and reads the failure as "not supported".
+        view supportsInterface(interface_id: bytes4) -> bool => [
+            return(interface_id == 0x01ffc9a7 || interface_id == 0x3edbb4c4)
+        ]
+
+        view canSend(account: address) -> bool => [
+            return(send_allowed(m_send_blocked, account))
+        ]
+
+        view canReceive(account: address) -> bool => [
+            return(receive_allowed(m_recv_blocked, account))
+        ]
+
+        view canTransfer(from_addr: address, to: address, amount: U256) -> bool => [
+            return(transfer_allowed(m_send_blocked, m_recv_blocked,
+                                    m_frozen, m_balances,
+                                    from_addr, to, amount))
+        ]
+
+        view getFrozenTokens(account: address) -> U256 => [
+            return(frozen_of(m_frozen, account))
+        ]
+
+        // The amount this address may still move. Not part of the standard's
+        // interface, and worth exposing anyway: every integrator computes it,
+        // and the saturating subtraction is the one place a naive caller
+        // underflows.
+        view unfrozenTokens(account: address) -> U256 => [
+            return(unfrozen_of(m_frozen, m_balances, account))
+        ]
+
+        // ── The base views ──────────────────────────────────────────────
+
+        view operator() -> address => [ return(m_operator) ]
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        view allowance(owner: address, spender: address) -> U256 => [
+            return(allowance_of(m_allowances, owner, spender))
+        ]
+
+        view totalSupply() -> U256 => [ return(m_total_supply) ]
+    }
+
+    m_operator: address { in constructor(operator_, _, _) => operator_ }
+
+    m_total_supply: U256 {
+        in constructor(_, _, initial_supply) => initial_supply
+        in mint(_, amount) => m_total_supply + amount
+        in burn(amount)    => m_total_supply - amount
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(_, initial_holder, initial_supply) => {
+            {}.insert(initial_holder, initial_supply)
+        }
+        // Both balances are read before either is written, so when payer and
+        // payee are the same address the credit overwrites the debit and the
+        // account gains `amount` out of nothing. A self-transfer moves
+        // nothing, so returning the map untouched is both the fix and the
+        // right semantics. The same guard appears in `ERC20.cam`; the bug it
+        // prevents was found there by a stateful invariant, not by review.
+        in transfer(to, amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            let bal_to   = balance_of(m_balances, to);
+            if to == msg::sender { m_balances } else {
+                m_balances
+                    .update(msg::sender, bal_from - amount)
+                    .update(to,          bal_to   + amount)
+            }
+        }
+        in transferFrom(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            if to == from_addr { m_balances } else {
+                m_balances
+                    .update(from_addr, bal_from - amount)
+                    .update(to,        bal_to   + amount)
+            }
+        }
+        in forcedTransfer(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            if to == from_addr { m_balances } else {
+                m_balances
+                    .update(from_addr, bal_from - amount)
+                    .update(to,        bal_to   + amount)
+            }
+        }
+        in mint(to, amount) => {
+            let bal_to = balance_of(m_balances, to);
+            m_balances.update(to, bal_to + amount)
+        }
+        in burn(amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            m_balances.update(msg::sender, bal_from - amount)
+        }
+    }
+
+    m_allowances: HashMap<U256, U256> {
+        in approve(spender, amount) => {
+            m_allowances.update(hashOf(msg::sender, spender), amount)
+        }
+        in transferFrom(from_addr, _, amount) => {
+            let key  = hashOf(from_addr, msg::sender);
+            let prev = allowance_of(m_allowances, from_addr, msg::sender);
+            m_allowances.update(key, allowance_after_spend(prev, amount))
+        }
+    }
+
+    m_frozen: HashMap<address, U256> {
+        in setFrozenTokens(account, amount) => {
+            m_frozen.update(account, amount)
+        }
+    }
+
+    m_send_blocked: HashMap<address, bool> {
+        in setSendBlocked(account, blocked) => {
+            m_send_blocked.update(account, blocked)
+        }
+    }
+
+    m_recv_blocked: HashMap<address, bool> {
+        in setReceiveBlocked(account, blocked) => {
+            m_recv_blocked.update(account, blocked)
+        }
+    }
+}

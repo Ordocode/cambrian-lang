@@ -1,0 +1,17 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// shared.cam — Phase Library-1 demonstration
+//
+// Common pure functions shared across multiple .cam files in this
+// project. Imported by `UniswapV2Pair.cam` via:
+//   `import "./shared.cam"`
+//
+// Listing this file here (instead of inlining the helpers in each
+// consumer) replaces the historical pattern where the project.yaml
+// `sources:` list was the only multi-file glue — now any `.cam` library
+// can declare its own dependencies and be shared across projects.
+
+pure fn min(a: U256, b: U256) -> U256 { if a < b { a } else { b } }
+pure fn max(a: U256, b: U256) -> U256 { if a > b { a } else { b } }
+pure fn mul_div(a: U256, b: U256, c: U256) -> U256 { a * b / c }

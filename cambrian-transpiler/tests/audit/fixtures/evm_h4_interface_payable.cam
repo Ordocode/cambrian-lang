@@ -1,0 +1,40 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H4: routes that read msg::value get `payable` on the
+// implementation but the emitted IERC interface only marks `accept` routes
+// payable — cross-entity calls with { value } may fail to compile or drop ETH.
+
+entity Payee {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        fund() => []
+        getTotal() -> u128 => [
+            return(m_total)
+        ]
+    }
+
+    m_total: u128 {
+        in constructor() => 0
+        in fund() => m_total + msg::value as u128
+    }
+}
+
+entity Payer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor(payee: Address<Payee>) => []
+        sendFund() => [
+            fund() ~> m_payee with { value: 1000000000000000000 }
+        ]
+    }
+
+    m_payee: Address<Payee> {
+        in constructor(payee) => payee
+    }
+}

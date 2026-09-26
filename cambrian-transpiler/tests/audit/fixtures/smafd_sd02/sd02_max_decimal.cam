@@ -1,0 +1,11 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// SD-02 S5b: decimal MAX_UINT256 + U256::MAX in property surface (PROP-CORE-008 layer A).
+
+property "decimal max roundtrip" () for Sd02Token {
+    call setMax()
+    call getMax()
+    expect return U256::MAX
+    expect return 115792089237316195423570985008687907853269984665640564039457584007913129639935
+}

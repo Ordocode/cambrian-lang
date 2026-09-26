@@ -1,0 +1,18 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity Counter {
+
+    routes {
+        increment(amount: u64) => []
+        reset() => []
+        getCount() -> u64 => [
+            return(m_count)
+        ]
+    }
+
+    m_count: u64 {
+        in increment(amount) => m_count + amount
+        in reset() => 0
+    }
+}

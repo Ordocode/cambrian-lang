@@ -1,0 +1,16 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Canonical SMAFD dual-target layout — EVM / Foundry leg.
+# See README.md in this directory.
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - cambrian-contracts/RehearsalToken.cam
+  - docs/cambrian-spec/RehearsalToken.properties.cam
+  - cambrian-contracts/RehearsalToken.test.cam
+  - cambrian-contracts/RehearsalToken.integration.test.cam
+  - cambrian-contracts/RehearsalToken.fuzz.cam
+  - cambrian-contracts/RehearsalToken.invariant.cam
+  - cambrian-contracts/RehearsalToken.invariant_ctor_mint.cam

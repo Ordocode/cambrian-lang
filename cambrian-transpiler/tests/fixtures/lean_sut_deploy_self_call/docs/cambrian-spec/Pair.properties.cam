@@ -1,0 +1,11 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+property "PROP self call after sut deploy" for Pair {
+    deploy t0 = Peer(sys::address, 1000) with { m_id: 0 }
+    deploy t1 = Peer(sys::address, 1000) with { m_id: 1 }
+    deploy pair = Pair() with { m_token0: t0, m_token1: t1 }
+
+    call token0()
+    expect return t0
+}

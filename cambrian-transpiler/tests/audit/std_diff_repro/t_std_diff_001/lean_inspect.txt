@@ -1,0 +1,6 @@
+route `runClamp` missing `Cambrian.clamp 150 0 100`
+def runClamp (w : Cambrian.Generated.World) (inst : StdDiffMath.Identity) (ctx : Cambrian.MsgCtx) : Cambrian.Generated.World × BitVec 64 :=
+  let s := w.storage.stdDiffMath inst
+  let (s, payload) :=
+    (s, (Cambrian.clamp (150 : BitVec 64) (0 : BitVec 64) (100 : BitVec 64)))
+  (Cambrian.Generated.World.withStdDiffMath w inst s, payload)

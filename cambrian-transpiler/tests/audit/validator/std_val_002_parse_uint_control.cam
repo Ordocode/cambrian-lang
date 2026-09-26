@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Control: explicit std::str::parse_uint bridge via pure fn (Option unwrap) — no V50.
+
+pure fn field() -> String { "42" }
+
+pure fn parsed_x() -> u64 {
+    match std::str::parse_uint(field(), 10) {
+        some(x) => x,
+        none => 0,
+    }
+}
+
+entity V50ParseUintControl {
+    routes {
+        go() => []
+    }
+
+    m_x: u64 {
+        in go() => parsed_x()
+    }
+}

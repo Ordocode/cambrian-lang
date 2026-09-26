@@ -1,0 +1,46 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// token_query.cam — EVM cross-contract view call with return value.
+// Demonstrates calling view functions on a typed Address<Token> member
+// and capturing the return value synchronously (EVM-only feature).
+
+entity Token {
+
+    routes {
+        constructor(initial_supply: U256) => []
+
+        view balanceOf(owner: address) -> U256 => [
+            return(m_total_supply)
+        ]
+
+        view totalSupply() -> U256 => [
+            return(m_total_supply)
+        ]
+    }
+
+    m_total_supply: U256 {
+        in constructor(initial_supply) => initial_supply
+    }
+}
+
+entity Vault {
+
+    routes {
+        constructor(token_addr: Address<Token>) => []
+
+        view myBalance(who: address) -> U256 => [
+            var bal = balanceOf(who) ~> m_token;
+            return(bal)
+        ]
+
+        view supply() -> U256 => [
+            var s = totalSupply() ~> m_token;
+            return(s)
+        ]
+    }
+
+    m_token: Address<Token> {
+        in constructor(token_addr) => token_addr
+    }
+}

@@ -1,0 +1,17 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: governor-spike
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - ../../../../examples/governor/ERC20Votes.cam
+  - ../../../../examples/governor/TimelockController.cam
+  - ../../../../examples/governor/Governor.cam
+  - ../../../../examples/governor/Governor.multi.invariant.cam
+invariant:
+  runs: 8
+  depth: 8
+  fail_on_revert: false
+  seed: 1

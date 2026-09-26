@@ -1,0 +1,8 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pm-m26-lean
+target: lean
+output_dir: build/
+sources:
+  - pm_m26_deploy_owner_guard.cam

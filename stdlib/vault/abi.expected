@@ -1,0 +1,95 @@
+# The external surface ERC-4626 demands of the vault entities.
+#
+# Checked by `scripts/abi-check.py stdlib/vault` against the artifacts Foundry
+# writes under `build/out/`. Only the standardised surface is listed; the
+# offset readers the accounting tier adds on top (`virtualShares`,
+# `minVirtualShares`) are extras, and `--strict` reports them as such rather
+# than as failures.
+#
+# Every line here is a claim a Solidity consumer relies on and no Cambrian
+# test can see, because the harness calls routes directly instead of encoding
+# a call and decoding a result.
+
+# ── ERC-4626, the vault half ──────────────────────────────────────────────
+# The four trade routes must answer a uint256. `deposit` says how many shares
+# were issued and `mint` how many assets were charged; an integrator that
+# routes a swap through the vault reads that answer instead of re-deriving it,
+# because the vault's own rounding is the only authority on it.
+#
+# `maxDeposit` and its siblings are what a UI calls before offering the trade,
+# so they must be views: a wallet simulating them cannot pay for a write.
+
+ERC4626Min  asset() -> (address)  view
+ERC4626Min  totalAssets() -> (uint256)  view
+ERC4626Min  convertToShares(uint256) -> (uint256)  view
+ERC4626Min  convertToAssets(uint256) -> (uint256)  view
+ERC4626Min  maxDeposit(address) -> (uint256)  view
+ERC4626Min  maxMint(address) -> (uint256)  view
+ERC4626Min  maxWithdraw(address) -> (uint256)  view
+ERC4626Min  maxRedeem(address) -> (uint256)  view
+ERC4626Min  previewDeposit(uint256) -> (uint256)  view
+ERC4626Min  previewMint(uint256) -> (uint256)  view
+ERC4626Min  previewWithdraw(uint256) -> (uint256)  view
+ERC4626Min  previewRedeem(uint256) -> (uint256)  view
+ERC4626Min  deposit(uint256,address) -> (uint256)  nonpayable
+ERC4626Min  mint(uint256,address) -> (uint256)  nonpayable
+ERC4626Min  withdraw(uint256,address,address) -> (uint256)  nonpayable
+ERC4626Min  redeem(uint256,address,address) -> (uint256)  nonpayable
+
+# A vault's deposit history is not recoverable from the share ledger: a
+# `Transfer` from the zero address says how many shares appeared and nothing
+# about what was paid for them. These two carry the price.
+
+ERC4626Min  event Deposit(indexed address, indexed address, uint256, uint256)
+ERC4626Min  event Withdraw(indexed address, indexed address, indexed address, uint256, uint256)
+
+# ── ERC-4626, the share-token half ────────────────────────────────────────
+# The shares are an ERC-20 in their own right; a vault whose shares cannot be
+# held by a wallet or priced by an AMM is not a vault anyone can use.
+
+ERC4626Min  totalSupply() -> (uint256)  view
+ERC4626Min  balanceOf(address) -> (uint256)  view
+ERC4626Min  allowance(address,address) -> (uint256)  view
+ERC4626Min  transfer(address,uint256) -> (bool)  nonpayable
+ERC4626Min  transferFrom(address,address,uint256) -> (bool)  nonpayable
+ERC4626Min  approve(address,uint256) -> (bool)  nonpayable
+ERC4626Min  name() -> (string)  view
+ERC4626Min  symbol() -> (string)  view
+ERC4626Min  decimals() -> (uint8)  view
+ERC4626Min  event Transfer(indexed address, indexed address, uint256)
+ERC4626Min  event Approval(indexed address, indexed address, uint256)
+
+# ── Accounting tier ───────────────────────────────────────────────────────
+# Same interface. The virtual-share offset changes the arithmetic behind the
+# preview answers, not their shape — which is the point: a consumer written
+# against the minimal tier keeps working against this one.
+
+ERC4626  asset() -> (address)  view
+ERC4626  totalAssets() -> (uint256)  view
+ERC4626  convertToShares(uint256) -> (uint256)  view
+ERC4626  convertToAssets(uint256) -> (uint256)  view
+ERC4626  maxDeposit(address) -> (uint256)  view
+ERC4626  maxMint(address) -> (uint256)  view
+ERC4626  maxWithdraw(address) -> (uint256)  view
+ERC4626  maxRedeem(address) -> (uint256)  view
+ERC4626  previewDeposit(uint256) -> (uint256)  view
+ERC4626  previewMint(uint256) -> (uint256)  view
+ERC4626  previewWithdraw(uint256) -> (uint256)  view
+ERC4626  previewRedeem(uint256) -> (uint256)  view
+ERC4626  deposit(uint256,address) -> (uint256)  nonpayable
+ERC4626  mint(uint256,address) -> (uint256)  nonpayable
+ERC4626  withdraw(uint256,address,address) -> (uint256)  nonpayable
+ERC4626  redeem(uint256,address,address) -> (uint256)  nonpayable
+ERC4626  event Deposit(indexed address, indexed address, uint256, uint256)
+ERC4626  event Withdraw(indexed address, indexed address, indexed address, uint256, uint256)
+ERC4626  totalSupply() -> (uint256)  view
+ERC4626  balanceOf(address) -> (uint256)  view
+ERC4626  allowance(address,address) -> (uint256)  view
+ERC4626  transfer(address,uint256) -> (bool)  nonpayable
+ERC4626  transferFrom(address,address,uint256) -> (bool)  nonpayable
+ERC4626  approve(address,uint256) -> (bool)  nonpayable
+ERC4626  name() -> (string)  view
+ERC4626  symbol() -> (string)  view
+ERC4626  decimals() -> (uint8)  view
+ERC4626  event Transfer(indexed address, indexed address, uint256)
+ERC4626  event Approval(indexed address, indexed address, uint256)

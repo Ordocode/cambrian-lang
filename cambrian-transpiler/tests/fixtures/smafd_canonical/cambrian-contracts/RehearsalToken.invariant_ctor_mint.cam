@@ -1,0 +1,6 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// CP-002 — ctor-mint only (no init {}); inherits actions/checks from catalog.
+invariant "CP-002 ctor mint only total supply" #[instantiates("INV-RHT-001")] for RehearsalToken {
+}

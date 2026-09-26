@@ -1,0 +1,36 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis LEAN-H4: typed send with `{ value: V }` must expose
+// `V` to the callee via `ctx.value` (msg::value), not only ledger transfer.
+
+entity Payee {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        accept deposit() => []
+        getSpent() -> u128 => [ return(m_spent) ]
+    }
+
+    m_spent: u128 {
+        in constructor() => 0
+        in deposit() => m_spent + msg::value as u128
+    }
+}
+
+entity Payer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        pay(payee_id: u64, amount: u128) => [
+            deposit() ~> Payee.address(payee_id) with { value: amount }
+        ]
+    }
+
+    m_x: u128 {}
+}

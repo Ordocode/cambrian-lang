@@ -1,0 +1,45 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-030 / H-AX-04-08: multi-entity test steps — EVM runs `deploy peer` +
+// `call peer.route`; Lean drops cross-contract steps and stale `expect return`.
+
+entity Host {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        probe() -> u64 => [
+            return(m_local)
+        ]
+    }
+
+    m_local: u64 {
+        in constructor() => 0
+    }
+}
+
+entity Peer {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        bump() => []
+
+        getBump() -> u64 => [
+            return(m_bumps)
+        ]
+    }
+
+    m_bumps: u64 {
+        in constructor() => 0
+        in bump() => m_bumps + 1
+    }
+}
+
+test "peer bump visible" for Host {
+    deploy peer = Peer()
+    call peer.bump()
+    call peer.getBump()
+    expect return 1
+}

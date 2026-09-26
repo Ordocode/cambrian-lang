@@ -1,0 +1,39 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for PhasedVault — phased routes with commit, exit, rawReserve, sends
+
+test "deposit adds balance" for PhasedVault with { m_balance: 0 } {
+    call deposit(500)
+    expect state { m_balance: 500 }
+}
+
+test "deposit produces phaseState and commit" for PhasedVault with { m_balance: 0 } {
+    call deposit(100)
+    expect effects [.., phaseState(), .., commit(), ..]
+}
+
+test "deposit accumulates across calls" for PhasedVault with { m_balance: 100 } {
+    call deposit(200)
+    expect state { m_balance: 300 }
+
+    call deposit(50)
+    expect state { m_balance: 350 }
+}
+
+test "withdraw insufficient throws" for PhasedVault with { m_balance: 100 } {
+    call withdraw(200)
+    expect throw 100
+}
+
+test "withdraw deducts and produces rawReserve" for PhasedVault with { m_balance: 1000 } {
+    call withdraw(300)
+    expect state { m_balance: 700 }
+    expect effects [.., phaseState(), .., rawReserve(100, 0), ..]
+}
+
+test "emergency_halt sets halted and produces commit then exit" for PhasedVault with { m_halted: false } {
+    call emergency_halt(42)
+    expect state { m_halted: true }
+    expect effects [.., phaseState(), .., commit(), .., phaseState(), .., exit(42)]
+}

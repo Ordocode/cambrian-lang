@@ -1,0 +1,27 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-035 / H-AX-02-02: phased pull/settle CEI window (PN-101 class).
+
+entity Vault {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        accept deposit() => []
+        withdraw(amount: u128) where amount <= m_bal : throw 101 => [
+            pull: [
+                ~> msg::sender with { value: amount }
+            ]
+            settle: []
+        ]
+        getBal() -> u128 => [ return(m_bal) ]
+    }
+
+    m_bal: u128 {
+        in constructor() => 0
+        in deposit() => m_bal + (msg::value as u128)
+        in withdraw(amount) => settle: m_bal - amount
+    }
+}

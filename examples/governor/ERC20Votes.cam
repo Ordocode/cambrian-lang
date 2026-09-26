@@ -1,0 +1,181 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// ERC20Votes — minimal Cambrian re-expression of OpenZeppelin's
+// ERC20 + Votes extension. Singleton (no identity) — there is exactly
+// one token contract per project. Voting power tracking is member-centric:
+// every transfer / mint / burn / delegate updates `m_votes` directly via
+// member transforms; there is no `_beforeTokenTransfer` hook.
+//
+// Simplifications vs OZ v5.0.2:
+//   - No checkpoints / historical lookups: only current-block voting
+//     power. `getVotes(a)` returns m_votes[a]. (OZ exposes `getPastVotes`
+//     for snapshot-based quorum; the Cambrian Governor in this example
+//     uses current-block votes only — see PLAN.md::Out-of-scope.)
+//   - No EIP-2612 permit / delegateBySig (no `ecrecover` in EVM target).
+//   - `mint` is open to anyone for the example only; a real deployment
+//     would gate on `from m_minter` or similar.
+//   - Local-let names within different member transforms of the same
+//     route are deliberately distinct (`bal_*` / `votes_*` / `del_*`)
+//     to avoid Solidity-side shadowing when the transforms are
+//     flattened into a single function body by the EVM codegen.
+
+// Pure helpers over storage-mapping references (G-T5 lowering: HashMap
+// params become `mapping(...) storage`). On EVM the default value of a
+// missing key is 0 / address(0), so for balances/votes the unset case
+// is indistinguishable from a zero balance — we just read the slot.
+// For delegations we self-delegate when the slot is the zero sentinel.
+pure fn balance_of(balances: HashMap<address, U256>, owner: address) -> U256 {
+    balances[owner]
+}
+
+pure fn votes_of(votes: HashMap<address, U256>, who: address) -> U256 {
+    votes[who]
+}
+
+pure fn delegate_of(delegates: HashMap<address, address>, who: address) -> address {
+    if delegates[who] == address(0) { who } else { delegates[who] }
+}
+
+entity ERC20Votes {
+
+    routes {
+        #[factory_only]
+        constructor(initial_holder: address, initial_supply: U256) => []
+
+        transfer(to: address, amount: U256)
+            where amount > 0 : throw 1 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 2
+        => []
+
+        mint(to: address, amount: U256)
+            where amount > 0 : throw 1
+        => []
+
+        burn(amount: U256)
+            where amount > 0 : throw 1 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 2
+        => []
+
+        delegate(to: address) => []
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        view totalSupply() -> U256 => [
+            return(m_total_supply)
+        ]
+
+        view getVotes(who: address) -> U256 => [
+            return(votes_of(m_votes, who))
+        ]
+
+        view delegates(who: address) -> address => [
+            return(delegate_of(m_delegates, who))
+        ]
+    }
+
+    m_total_supply: U256 {
+        in constructor(_, supply) => supply
+        in mint(_, amount) => m_total_supply + amount
+        in burn(amount)    => m_total_supply - amount
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(holder, supply) => {
+            {}.insert(holder, supply)
+        }
+        // Both balances are read before either is written, so when payer and
+        // payee are the same address the credit overwrites the debit and the
+        // account gains `amount` out of nothing. `m_total_supply` is a stored
+        // scalar and does not move, so a conservation claim stays green while
+        // the token mints. A self-transfer moves nothing, so returning the map
+        // untouched is also the right semantics.
+        in transfer(to, amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            let bal_to   = balance_of(m_balances, to);
+            if to == msg::sender { m_balances } else {
+                m_balances
+                    .update(msg::sender, bal_from - amount)
+                    .update(to,          bal_to   + amount)
+            }
+        }
+        in mint(to, amount) => {
+            let bal_to = balance_of(m_balances, to);
+            m_balances.update(to, bal_to + amount)
+        }
+        in burn(amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            m_balances.update(msg::sender, bal_from - amount)
+        }
+    }
+
+    // delegates[who] returns the address `who` has chosen to delegate
+    // their voting power to. Default (no entry) is self-delegation —
+    // see `delegate_of` pure fn.
+    m_delegates: HashMap<address, address> {
+        in constructor(holder, _) => {
+            {}.insert(holder, holder)
+        }
+        in delegate(to) => {
+            m_delegates.update(msg::sender, to)
+        }
+    }
+
+    // Voting power lives in `m_votes`. Updated whenever balance moves
+    // between addresses (transfer / mint / burn) or whenever an address
+    // re-delegates. A self-delegation is the default, so an EOA that
+    // never calls `delegate(...)` still contributes to its own voting
+    // power.
+    m_votes: HashMap<address, U256> {
+        in constructor(holder, supply) => {
+            {}.insert(holder, supply)
+        }
+        // The two keys here are *delegates*, not the transacting accounts, so
+        // they alias far more easily than a self-transfer does: any two holders
+        // who picked the same delegate collide, and so does a transfer to
+        // oneself. Both reads happen before either write, so a collision has
+        // the credit overwrite the debit and the delegate gains `amount` votes
+        // out of nothing. When the delegate is unchanged the ledger owes no
+        // update at all.
+        in transfer(to, amount) => {
+            let del_from = delegate_of(m_delegates, msg::sender);
+            let del_to   = delegate_of(m_delegates, to);
+            let v_from = votes_of(m_votes, del_from);
+            let v_to   = votes_of(m_votes, del_to);
+            if del_to == del_from { m_votes } else {
+                m_votes
+                    .update(del_from, v_from - amount)
+                    .update(del_to,   v_to   + amount)
+            }
+        }
+        in mint(to, amount) => {
+            let del_to = delegate_of(m_delegates, to);
+            let v_to   = votes_of(m_votes, del_to);
+            m_votes.update(del_to, v_to + amount)
+        }
+        in burn(amount) => {
+            let del_from = delegate_of(m_delegates, msg::sender);
+            let v_from   = votes_of(m_votes, del_from);
+            m_votes.update(del_from, v_from - amount)
+        }
+        // Re-delegating to the delegate you already have is the easiest of the
+        // three aliasing cases to reach: `delegate_of` defaults to the caller,
+        // so a holder who never delegated and now calls `delegate(self)` lands
+        // here. Both reads precede both writes, so the credit overwrites the
+        // debit and the delegate gains the caller's whole balance in votes. A
+        // no-op re-delegation moves no voting power.
+        in delegate(to) => {
+            let bal     = balance_of(m_balances, msg::sender);
+            let old_del = delegate_of(m_delegates, msg::sender);
+            let v_old   = votes_of(m_votes, old_del);
+            let v_new   = votes_of(m_votes, to);
+            if to == old_del { m_votes } else {
+                m_votes
+                    .update(old_del, v_old - bal)
+                    .update(to,      v_new + bal)
+            }
+        }
+    }
+}

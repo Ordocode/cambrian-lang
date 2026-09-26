@@ -1,0 +1,12 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: smafd-sd02
+target: lean
+output_dir: build-lean/
+sources:
+  - sd02_token.cam
+  - sd02_fuzz_max.cam
+  - sd02_max_decimal.cam
+lean:
+  numerics: nat

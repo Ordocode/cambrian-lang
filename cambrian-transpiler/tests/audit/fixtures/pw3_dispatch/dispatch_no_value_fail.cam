@@ -1,0 +1,36 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-004 row 4: dynamic dispatch with `{ value: 0 }` to fallible callee.
+
+entity Payee {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+
+        accept failDeposit() where (false) : throw 1 => []
+    }
+
+    m_x: u64 {
+        in create() => 0
+    }
+}
+
+entity Payer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create(dest: Address<Payee>) => []
+
+        payZero() => [
+            failDeposit() ~> m_dest with { value: 0 }
+        ]
+    }
+
+    m_dest: Address<Payee> {
+        in create(dest) => dest
+    }
+}

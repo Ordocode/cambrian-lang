@@ -1,0 +1,115 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Staking — stake, unstake, claimRewards with time-based rewards
+
+test "constructor initializes empty state" for Staking {
+    call constructor()
+    expect state { m_staker_count: 0 }
+}
+
+test "stake zero amount throws" for Staking {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    call constructor()
+
+    msg { sender: alice, timestamp: 1000 }
+    call stake(0)
+    expect throw 1
+}
+
+test "stake adds to total staked" for Staking {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    call constructor()
+
+    msg { sender: alice, timestamp: 1000 }
+    call stake(500)
+    expect state { m_staker_count: 1 }
+
+    call getStakerCount()
+    expect return 1
+}
+
+test "unstake without staking throws" for Staking {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    call constructor()
+
+    msg { sender: alice, timestamp: 1000 }
+    call unstake(100)
+    expect throw 2
+}
+
+test "unstake zero amount throws" for Staking {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    call constructor()
+
+    msg { sender: alice, timestamp: 1000 }
+    call stake(500)
+
+    msg { sender: alice, timestamp: 2000 }
+    call unstake(0)
+    expect throw 1
+}
+
+test "claimRewards without staking throws" for Staking {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    call constructor()
+
+    msg { sender: alice, timestamp: 1000 }
+    call claimRewards()
+    expect throw 2
+}
+
+test "claimRewards sends message to sender" for Staking {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    call constructor()
+
+    msg { sender: alice, timestamp: 1000 }
+    call stake(1000)
+
+    msg { sender: alice, timestamp: 2000 }
+    call claimRewards()
+    expect effects [~> alice, ..]
+}
+
+test "getStake returns staked amount" for Staking {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    call constructor()
+
+    msg { sender: alice, timestamp: 1000 }
+    call stake(777)
+
+    call getStake(alice)
+    expect return 777
+}
+
+test "getStakerCount tracks unique stakers" for Staking {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    call constructor()
+
+    call getStakerCount()
+    expect return 0
+
+    msg { sender: alice, timestamp: 1000 }
+    call stake(100)
+    call getStakerCount()
+    expect return 1
+
+    msg { sender: bob, timestamp: 1001 }
+    call stake(200)
+    call getStakerCount()
+    expect return 2
+
+    msg { sender: alice, timestamp: 1002 }
+    call stake(50)
+    call getStakerCount()
+    expect return 2
+}

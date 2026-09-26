@@ -1,0 +1,13 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity ExprFuzz {
+    routes {
+        constructor() => []
+        probe(n: u64) -> u64 => [
+            let x = m_count == 658;
+            return(m_count)
+        ]
+    }
+    m_count: u64 { in constructor() => 0 }
+}

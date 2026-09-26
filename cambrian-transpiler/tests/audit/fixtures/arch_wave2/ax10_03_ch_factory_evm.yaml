@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: arch-ax10-03-evm
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - ax10_03_ch_factory.cam

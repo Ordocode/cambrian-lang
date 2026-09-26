@@ -1,0 +1,78 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Complex phased escrow contract — tests multi-phase, multi-member,
+// mixed phased/unphased routes, where clauses, conditionals.
+
+use gosh
+
+entity Escrow {
+    routes {
+        // Phased route: two-phase deposit
+        accept fund(amount: u128, token_id: u64)
+            where amount > 0 : throw 101
+        => [
+            lock: [
+                gosh::rawReserve(100, 0)
+            ]
+            confirm: [
+                gosh::commit()
+            ]
+        ]
+
+        // Phased route: three-phase release (plain transfer, no named message)
+        release(recipient: address)
+            where m_locked == true : throw 200
+        => [
+            prepare: []
+            transfer: [
+                ~> recipient with { value: m_balance }
+                gosh::commit()
+            ]
+            finalize: []
+        ]
+
+        // Unphased route: simple view
+        view status() -> bool => [
+            return(m_locked)
+        ]
+
+        // Unphased route with effect
+        cancel()
+            where m_locked == true : throw 300
+        => [
+            gosh::commit()
+        ]
+
+        // Phased init
+        init create(owner: address, arbiter: address) => [
+            setup: []
+        ]
+    }
+
+    m_balance: u128 {
+        in fund(amount, token_id) => lock: m_balance + amount
+        in release(recipient) => prepare: 0
+    }
+
+    m_locked: bool {
+        in fund(amount, token_id) => confirm: true
+        in release(recipient) => finalize: false
+        in cancel() => false
+    }
+
+    m_owner: address {
+        in create(owner, arbiter) => setup: owner
+    }
+
+    m_arbiter: address {
+        in create(owner, arbiter) => setup: arbiter
+    }
+
+    m_token_id: u64 {
+        in fund(amount, token_id) => lock: token_id
+    }
+}

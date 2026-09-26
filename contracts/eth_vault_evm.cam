@@ -1,0 +1,21 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Phase EVM-P0-E: ETH-receiving vault fixture exercising `receive()`
+// and `fallback()` lowering to Solidity's special functions.
+// Round-tripped through `solc` by `evm_p0_e_solc_round_trip_eth_vault`.
+
+entity EthVault {
+    routes {
+        accept receive() => []
+        fallback() => []
+        view balance() -> U256 => [
+            return(m_balance)
+        ]
+    }
+
+    m_balance: U256 {
+        in receive() => m_balance + msg::value
+        in fallback() => m_balance + msg::value
+    }
+}

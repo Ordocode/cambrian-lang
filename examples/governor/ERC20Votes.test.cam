@@ -1,0 +1,113 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Unit tests for ERC20Votes — singleton ERC20 with voting power tracking.
+// Verifies balance accounting, voting power propagation through delegation,
+// and the basic mint / burn / transfer happy paths.
+//
+// Address constants are kept symmetrical with the rest of the example so
+// the same actors play the same roles across all three entity test files.
+
+test "constructor mints initial supply to holder" for ERC20Votes {
+    let holder = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor(holder, 1000000)
+    expect state { m_total_supply: 1000000 }
+
+    call balanceOf(holder)
+    expect return 1000000
+
+    call totalSupply()
+    expect return 1000000
+
+    call getVotes(holder)
+    expect return 1000000
+}
+
+test "transfer moves balance and voting power" for ERC20Votes {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(alice, 1000)
+
+    msg { sender: alice }
+    call transfer(bob, 250)
+
+    call balanceOf(alice)
+    expect return 750
+    call balanceOf(bob)
+    expect return 250
+
+    call getVotes(alice)
+    expect return 750
+    call getVotes(bob)
+    expect return 250
+}
+
+test "transfer of zero throws" for ERC20Votes {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(alice, 1000)
+    msg { sender: alice }
+    call transfer(bob, 0)
+    expect throw 1
+}
+
+test "transfer over balance throws" for ERC20Votes {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(alice, 1000)
+    msg { sender: alice }
+    call transfer(bob, 1001)
+    expect throw 2
+}
+
+test "delegate redirects voting power" for ERC20Votes {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(alice, 1000)
+
+    msg { sender: alice }
+    call delegate(bob)
+
+    call getVotes(alice)
+    expect return 0
+    call getVotes(bob)
+    expect return 1000
+
+    call delegates(alice)
+    expect return bob
+}
+
+test "mint grows total supply and voter weight" for ERC20Votes {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(alice, 100)
+    call mint(bob, 200)
+
+    call totalSupply()
+    expect return 300
+    call balanceOf(bob)
+    expect return 200
+    call getVotes(bob)
+    expect return 200
+}
+
+test "burn shrinks total supply and voter weight" for ERC20Votes {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor(alice, 1000)
+    msg { sender: alice }
+    call burn(400)
+
+    call totalSupply()
+    expect return 600
+    call balanceOf(alice)
+    expect return 600
+    call getVotes(alice)
+    expect return 600
+}

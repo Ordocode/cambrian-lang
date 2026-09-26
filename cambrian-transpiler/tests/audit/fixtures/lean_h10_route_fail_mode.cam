@@ -1,0 +1,47 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis LEAN-H10: `route_fail_mode` does not recurse into nested
+// `CallRoute` / `VarCall` / `Rescue`, so a wrapper route that only delegates
+// to a throwing callee is emitted as a total `World → World` signature instead
+// of `RouteResult`. The audit harness skips validator L11 (codegen-only inspect).
+
+entity FailSurface {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        invoke(amount: u64) => [
+            call failingHelper(amount)
+        ]
+
+        private failingHelper(amount: u64)
+            where amount < 500 : throw 2
+        => []
+
+        risky(amount: u64)
+            where amount < 1000 : throw 1
+        => []
+
+        inc() => []
+    }
+
+    m_count: u64 {
+        in create() => 0
+        in inc() => m_count + 1
+    }
+}
+
+invariant "nested call fail surface" for FailSurface {
+    init { m_count: 0 }
+
+    action invoke(amount: u64) {
+        bound amount in 0..1000
+    }
+    action risky(amount: u64) {
+        bound amount in 0..1000
+    }
+    action inc() { }
+
+    check m_count >= 0
+}

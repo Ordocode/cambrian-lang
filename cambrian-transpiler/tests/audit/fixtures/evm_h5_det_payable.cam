@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H5: deterministic-mode routes that read msg::value
+// must compile (payable auto-detection on gen_route_impl_ext).
+
+entity Recorder {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        accept receive() => []
+        getTotal() -> u128 => [
+            return(m_total)
+        ]
+    }
+
+    m_total: u128 {
+        in constructor() => 0
+        in receive() => m_total + msg::value as u128
+    }
+}

@@ -1,0 +1,18 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+use gosh
+
+entity Wallet {
+
+    routes {
+        withdraw(to: address, amount: u64) => [
+            gosh::rawReserve(sys::balance - amount, 0)
+            ~> to with {value: 0, flags: 128}
+        ]
+    }
+
+    m_balance: u64 {
+        in withdraw(_, amount) => m_balance - amount
+    }
+}

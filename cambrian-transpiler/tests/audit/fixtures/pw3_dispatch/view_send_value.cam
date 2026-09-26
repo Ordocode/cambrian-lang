@@ -1,0 +1,59 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Escrow-corpus (slice V1, NEGATIVE): the VALUE-carrying variant of the
+// tuple-bind call site. `~> <E>.address(…) with { value: v }` to a fallible
+// route routes the call through `Cambrian.WorldState.call w callParams (fun w
+// => …)` and binds the pair monadically:
+//
+//   let (w, got) ← Cambrian.WorldState.call w callParams fun w => Oracle.Routes.quote …
+//
+// The R3 digest predictor does not model that grammar (`callParams` +
+// `MsgCtx.withValue` + `WorldState.call` under a bind), so the escrow emitter
+// aborts at TRANSPILE time with a precise message rather than shipping a form
+// whose mismatch would only surface at deal time. Legacy compiles it, so this
+// is OUR boundary, not an upstream bug — see local_changes.md §40.
+entity Oracle {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        view quote(n: u64) -> u64
+            where n < 100 : throw 1
+        => [
+            return(n + m_base)
+        ]
+    }
+
+    m_base: u64 {
+        in create() => 7
+    }
+}
+
+entity Caller {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        // `echo` is CONSUMED by the `if` below on purpose: validator rule V51
+        // (arrived with the `audit` merge) rejects an unused `let` binding
+        // before codegen ever runs, which used to make this corpus fail on the
+        // WRONG signature (`error [V51]`) instead of the escrow abort it exists
+        // to pin. The value-carrying call site — the actual subject — is the
+        // `~> … with { value: 1 }` statement above and is untouched.
+        ask(n: u64)
+            where n < 20 : throw 2
+        => [
+            var got = quote(n) ~> Oracle.address() with { value: 1 };
+            let echo = got + 1;
+            if echo > 0 => [
+                throw 3
+            ]
+        ]
+    }
+
+    m_seen: u64 {
+        in create() => 0
+        in ask(n) => m_seen + 1
+    }
+}

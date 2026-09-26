@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-014 row 2: map.filter.map.fold (extends S-010 escrow probe).
+
+pure fn wide_sum(xs: Vec<u64>) -> u64 {
+    xs.iter().map(|x| x + 1).filter(|x| *x > 2).map(|x| x * 2).fold(0, |a, b| a + b)
+}
+
+entity ChainWide {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        run(items: Vec<u64>) -> u64 => [
+            return(wide_sum(items))
+        ]
+    }
+
+    m_n: u64 {
+        in constructor() => 0
+    }
+}

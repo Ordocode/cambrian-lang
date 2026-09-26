@@ -1,0 +1,11 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Factory deploy: mint beneficiary via constructor(recipient).
+
+test "ctor mints to deployer" for S6Token {
+    call constructor(0x0000000000000000000000000000000000000d01)
+
+    call balanceOf(0x0000000000000000000000000000000000000d01)
+    expect return 1000000000000000000
+}

@@ -1,0 +1,29 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H9: hoisted `if` without `else` defaults missing branch to `0`.
+// Source now includes `else` (V48 rejects value-context if-without-else); the
+// historical shape is covered by unit tests in test_validate.rs.
+
+entity BoolPick {
+    routes {
+        #[factory_only]
+        constructor() => []
+        pick(on: bool) => []
+        getFlag() -> bool => [
+            return(m_flag)
+        ]
+    }
+
+    m_flag: bool {
+        in constructor() => false
+        in pick(on) => {
+            if on {
+                let t = true;
+                t
+            } else {
+                false
+            }
+        }
+    }
+}

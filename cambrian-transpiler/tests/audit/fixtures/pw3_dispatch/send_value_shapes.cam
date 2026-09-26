@@ -1,0 +1,39 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-004 row 5: audit-trimmed from escrow `send_value_shapes` (pay / bump leg only).
+// Full corpus also covers poke/free/ask value-shape variants (lean lake smoke uses full copy in view_send_value sibling).
+
+entity Oracle {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        accept bump(n: u64)
+            where n < 100 : throw 1
+        => []
+    }
+
+    m_base: u64 {
+        in create() => 7
+        in bump(n) => m_base + n
+    }
+}
+
+entity Payer {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        pay(n: u64, v: U256)
+            where n < 20 : throw 2
+        => [
+            bump(n) ~> Oracle.address() with { value: v }
+        ]
+    }
+
+    m_hits: u64 {
+        in create() => 0
+        in pay(n, v) => m_hits + 1
+    }
+}

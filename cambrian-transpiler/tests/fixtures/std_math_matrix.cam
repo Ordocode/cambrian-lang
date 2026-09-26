@@ -1,0 +1,57 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// STD-EVM-MATRIX-1: phase-1 std::math semantic gate (forge).
+
+pure fn p_min(a: u64, b: u64) -> u64 { std::math::min(a, b) as u64 }
+pure fn p_max(a: u64, b: u64) -> u64 { std::math::max(a, b) as u64 }
+pure fn p_abs_i(x: i64) -> i64 { std::math::abs(x) as i64 }
+pure fn p_clamp(x: u64, lo: u64, hi: u64) -> u64 { std::math::clamp(x, lo, hi) as u64 }
+pure fn p_muldiv(x: u64, y: u64, z: u64) -> u64 { std::math::muldiv(x, y, z) as u64 }
+pure fn p_muldivmod(x: u64, y: u64, z: u64) -> (u64, u64) {
+    let (q, r) = std::math::muldivmod(x, y, z);
+    (q as u64, r as u64)
+}
+pure fn p_divmod(a: u64, b: u64) -> (u64, u64) {
+    let (q, r) = std::math::divmod(a, b);
+    (q as u64, r as u64)
+}
+pure fn p_divc(a: u64, b: u64) -> u64 { std::math::divc(a, b) as u64 }
+pure fn p_divr(a: u64, b: u64) -> u64 { std::math::divr(a, b) as u64 }
+pure fn p_sign(x: i64) -> i64 { std::math::sign(x) as i64 }
+pure fn p_minmax(a: u64, b: u64) -> (u64, u64) {
+    (std::math::min(a, b) as u64, std::math::max(a, b) as u64)
+}
+pure fn p_modpow2(x: u64, n: u64) -> u64 { std::math::modpow2(x, n) as u64 }
+pure fn p_pow(base: u64, exp: u64) -> u64 { std::math::pow(base, exp) as u64 }
+pure fn p_muldiv_u256(x: U256, y: U256, z: U256) -> U256 { std::math::muldiv(x, y, z) }
+
+entity StdMathMatrix {
+    routes {
+        constructor() => []
+
+        runMin(a: u64, b: u64) -> u64 => [ return(std::math::min(a, b)) ]
+        runMax(a: u64, b: u64) -> u64 => [ return(std::math::max(a, b)) ]
+        runAbsI(x: i64) -> i64 => [ return(std::math::abs(x)) ]
+        runClamp(x: u64, lo: u64, hi: u64) -> u64 => [ return(std::math::clamp(x, lo, hi)) ]
+        runMuldiv(x: u64, y: u64, z: u64) -> u64 => [ return(std::math::muldiv(x, y, z)) ]
+        runMuldivmod(x: u64, y: u64, z: u64) -> (u64, u64) => [ return(p_muldivmod(x, y, z)) ]
+        runDivmod(a: u64, b: u64) -> (u64, u64) => [ return(p_divmod(a, b)) ]
+        runDivc(a: u64, b: u64) -> u64 => [ return(std::math::divc(a, b)) ]
+        runDivr(a: u64, b: u64) -> u64 => [ return(std::math::divr(a, b)) ]
+        runSign(x: i64) -> i64 => [ return(std::math::sign(x)) ]
+        runMinmax(a: u64, b: u64) -> (u64, u64) => [ return(p_minmax(a, b)) ]
+        runModpow2(x: u64, n: u64) -> u64 => [ return(std::math::modpow2(x, n)) ]
+        runPow(base: u64, exp: u64) -> u64 => [ return(std::math::pow(base, exp)) ]
+        runMuldivU256Wide() -> U256 => [
+            return(p_muldiv_u256((1 as U256) << 128, (1 as U256) << 128, (1 as U256) << 128))
+        ]
+
+        runPureMin(a: u64, b: u64) -> u64 => [ return(p_min(a, b)) ]
+        runPureMuldivmod(x: u64, y: u64, z: u64) -> (u64, u64) => [ return(p_muldivmod(x, y, z)) ]
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+    }
+}

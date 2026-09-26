@@ -1,0 +1,21 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Trace-aware invariant fixture: exercises `trace::length`,
+// `trace::count(route)` and `trace::lastWas(route)` in `assume`/`check`
+// across the Lean and dynamic (Foundry / revm / Acki) backends.
+invariant "trace bounded counter" for Counter {
+    init { m_count: 0 }
+
+    action increment(amount: u64) {
+        bound amount in 1..100
+        assume trace::length < 8
+        assume trace::count(increment) <= trace::count(reset) + 5
+    }
+    action reset() {
+        assume !trace::lastWas(reset)
+    }
+
+    check m_count >= 0
+    check trace::count(increment) >= trace::count(reset)
+}

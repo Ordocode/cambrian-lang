@@ -1,0 +1,66 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-004 row 5b: full escrow `send_value_shapes` corpus (lean lake smoke — all value legs).
+
+entity Oracle {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        view quote(n: u64) -> u64
+            where n < 100 : throw 1
+        => [
+            return(n + m_base)
+        ]
+
+        bump(n: u64)
+            where n < 100 : throw 1
+        => []
+
+        tick(n: u64) => []
+    }
+
+    m_base: u64 {
+        in create() => 7
+        in bump(n) => m_base + n
+        in tick(n) => m_base + n
+    }
+}
+
+entity Payer {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        pay(n: u64, v: U256)
+            where n < 20 : throw 2
+        => [
+            bump(n) ~> Oracle.address() with { value: v }
+        ]
+
+        poke(n: u64)
+            where n < 20 : throw 3
+        => [
+            tick(n) ~> Oracle.address() with { value: 2 }
+        ]
+
+        free(n: u64, v: U256) => [
+            tick(n) ~> Oracle.address() with { value: v }
+        ]
+
+        ask(n: u64)
+            where n < 20 : throw 4
+        => [
+            quote(n) ~> Oracle.address() with { value: 7 }
+        ]
+    }
+
+    m_hits: u64 {
+        in create() => 0
+        in pay(n, v) => m_hits + 1
+        in poke(n) => m_hits + 2
+        in free(n, v) => m_hits + 3
+        in ask(n) => m_hits + 4
+    }
+}

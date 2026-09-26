@@ -1,0 +1,24 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-016 / H-AX-06-01: HashMap `keys()` order — EVM `_keys` FIFO append;
+// Lean ghost list prepends via `pushKeyIfNew` (LIFO). Non-commutative first-key
+// pick diverges after insert A then insert B.
+
+entity KeyOrderProbe {
+    routes {
+        #[factory_only]
+        init setup() => []
+
+        put(k: u64, v: u64) => []
+
+        firstKey() -> u64 => [
+            return(m.keys().fold(0, |acc, k| if acc == 0 { k } else { acc }))
+        ]
+    }
+
+    m: HashMap<u64, u64> {
+        in setup() => HashMap::new()
+        in put(k, v) => m.insert(k, v)
+    }
+}

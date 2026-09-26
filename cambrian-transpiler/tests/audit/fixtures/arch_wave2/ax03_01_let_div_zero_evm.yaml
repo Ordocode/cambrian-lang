@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: arch-ax03-01-evm
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - ax03_01_let_div_zero.cam

@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: arch-ax04-02-evm
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - ax04_02_msg_value_harness.cam

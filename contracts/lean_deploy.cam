@@ -1,0 +1,22 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// P4a smoke: deploy Entity(args).
+
+entity Child {
+    identity m_id: u64
+
+    routes {
+        constructor() => []
+    }
+}
+
+entity Factory {
+    routes {
+        constructor() => []
+
+        spawn(id: u64) => [
+            deploy Child(id)
+        ]
+    }
+}

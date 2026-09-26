@@ -1,0 +1,18 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-017 / H-AX-05-01: mixed-sign compare u64 vs i64 — EVM `<` skips
+// SignPromote (solc rejects); Lean widens and uses `.slt`.
+
+entity SignMixProbe {
+    const HIGH: u64 = 9223372036854775808
+
+    routes {
+        #[factory_only]
+        init setup() => []
+
+        highLessThan(i: i64) -> bool => [
+            return(HIGH < i)
+        ]
+    }
+}

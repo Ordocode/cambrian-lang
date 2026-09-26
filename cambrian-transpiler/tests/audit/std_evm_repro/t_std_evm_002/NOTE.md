@@ -1,0 +1,346 @@
+# T-STD-EVM-002 / STD-H-EVM-2 repro
+
+Forge test failed for `StdStrMatrixTest`.
+
+Fixture: `tests/fixtures/std_str_matrix.cam`
+Routes: runFormatDefault, runFormatPad6, runParseDec, runParseHex, runRoundTrip
+
+Re-run:
+`cargo test -p cambrian-transpiler --test test_audit_std_evm audit_std_evm_str_forge -- --nocapture`
+
+--- forge log ---
+stdout:
+Compiling 21 files with Solc 0.8.24
+Solc 0.8.24 finished in 775.27ms
+Compiler run successful with warnings:
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:173:26:
+    |
+173 |         (bool _cam_tmp6, uint256 _cam_tmp7) = _cam_try_parse_radix("100", 16, 8);
+    |                          ^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:224:27:
+    |
+224 |         (bool _cam_tmp18, uint256 _cam_tmp19) = _cam_try_parse_radix("65536", 10, 16);
+    |                           ^^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:249:27:
+    |
+249 |         (bool _cam_tmp24, uint256 _cam_tmp25) = _cam_try_parse_radix("4294967296", 10, 32);
+    |                           ^^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:274:27:
+    |
+274 |         (bool _cam_tmp30, uint256 _cam_tmp31) = _cam_try_parse_radix("340282366920938463463374607431768211456", 10, 128);
+    |                           ^^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:299:27:
+    |
+299 |         (bool _cam_tmp36, uint256 _cam_tmp37) = _cam_try_parse_radix("1000000000000000000000000000000000000000000000000000000000000000", 16, 256);
+    |                           ^^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:324:27:
+    |
+324 |         (bool _cam_tmp42, int256 _cam_tmp43) = _cam_try_parse_radix_signed("-129", 10, 8);
+    |                           ^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:349:27:
+    |
+349 |         (bool _cam_tmp48, int256 _cam_tmp49) = _cam_try_parse_radix_signed("-32769", 10, 16);
+    |                           ^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:374:27:
+    |
+374 |         (bool _cam_tmp54, int256 _cam_tmp55) = _cam_try_parse_radix_signed("-2147483649", 10, 32);
+    |                           ^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:399:27:
+    |
+399 |         (bool _cam_tmp60, int256 _cam_tmp61) = _cam_try_parse_radix_signed("-9223372036854775809", 10, 64);
+    |                           ^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:411:27:
+    |
+411 |         (bool _cam_tmp63, int256 _cam_tmp64) = _cam_try_parse_radix_signed("80000000000000000000000000000000", 16, 128);
+    |                           ^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:449:27:
+    |
+449 |         (bool _cam_tmp72, uint256 _cam_tmp73) = _cam_try_parse_radix("10", 37, 64);
+    |                           ^^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:461:27:
+    |
+461 |         (bool _cam_tmp75, uint256 _cam_tmp76) = _cam_try_parse_radix("", 10, 64);
+    |                           ^^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:473:27:
+    |
+473 |         (bool _cam_tmp78, uint256 _cam_tmp79) = _cam_try_parse_radix("12a3", 10, 64);
+    |                           ^^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> src/_std-str-matrix_project.sol:485:27:
+    |
+485 |         (bool _cam_tmp81, uint256 _cam_tmp82) = _cam_try_parse_radix("0xff", 10, 64);
+    |                           ^^^^^^^^^^^^^^^^^^
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:138:5:
+    |
+138 |     function runFormatDefault() external returns (string memory) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:142:5:
+    |
+142 |     function runFormatPad6() external returns (string memory) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:146:5:
+    |
+146 |     function runParseDec() external returns (uint64) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:159:5:
+    |
+159 |     function runParseHex() external returns (uint64) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:172:5:
+    |
+172 |     function runParseU8Overflow() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:184:5:
+    |
+184 |     function runParseU8Max() external returns (uint8) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:197:5:
+    |
+197 |     function runParseU8Zero() external returns (uint8) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:210:5:
+    |
+210 |     function runParseU16Max() external returns (uint16) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:223:5:
+    |
+223 |     function runParseU16Overflow() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:235:5:
+    |
+235 |     function runParseU32Max() external returns (uint32) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:248:5:
+    |
+248 |     function runParseU32Overflow() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:260:5:
+    |
+260 |     function runParseU128Max() external returns (uint128) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:273:5:
+    |
+273 |     function runParseU128Overflow() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:285:5:
+    |
+285 |     function runParseU256Max() external returns (uint256) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:298:5:
+    |
+298 |     function runParseU256Overflow() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:310:5:
+    |
+310 |     function runParseI8Min() external returns (int8) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:323:5:
+    |
+323 |     function runParseI8Overflow() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:335:5:
+    |
+335 |     function runParseI16Min() external returns (int16) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:348:5:
+    |
+348 |     function runParseI16Overflow() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:360:5:
+    |
+360 |     function runParseI32Min() external returns (int32) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:373:5:
+    |
+373 |     function runParseI32Overflow() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:385:5:
+    |
+385 |     function runParseI64Min() external returns (int64) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:398:5:
+    |
+398 |     function runParseI64Overflow() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:410:5:
+    |
+410 |     function runParseI128Overflow() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:422:5:
+    |
+422 |     function runParseRadix2() external returns (uint8) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:435:5:
+    |
+435 |     function runParseRadix36() external returns (uint8) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:448:5:
+    |
+448 |     function runParseBadRadix() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:460:5:
+    |
+460 |     function runParseEmpty() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:472:5:
+    |
+472 |     function runParseInvalidDigit() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:484:5:
+    |
+484 |     function runParse0xWrongRadix() external returns (bool) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:496:5:
+    |
+496 |     function runParseUintAlias() external returns (uint64) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:509:5:
+    |
+509 |     function runParseIntAlias() external returns (int64) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+Warning (2018): Function state mutability can be restricted to pure
+   --> src/_std-str-matrix_project.sol:522:5:
+    |
+522 |     function runRoundTrip() external returns (uint64) {
+    |     ^ (Relevant source part starts here and spans across multiple lines).
+
+
+Ran 33 tests for test/StdStrMatrix.t.sol:StdStrMatrixTest
+[PASS] test_std_str_format_default() (gas: 14071)
+[PASS] test_std_str_format_pad6() (gas: 15851)
+[PASS] test_std_str_parse_0x_wrong_radix_none() (gas: 6400)
+[PASS] test_std_str_parse_bad_radix_none() (gas: 6305)
+[PASS] test_std_str_parse_empty_none() (gas: 6198)
+[PASS] test_std_str_parse_i128_overflow_none() (gas: 36710)
+[PASS] test_std_str_parse_i16_min() (gas: 12080)
+[PASS] test_std_str_parse_i16_overflow_none() (gas: 11866)
+[PASS] test_std_str_parse_i32_min() (gas: 16850)
+[PASS] test_std_str_parse_i32_overflow_none() (gas: 16575)
+[PASS] test_std_str_parse_i64_min() (gas: 25180)
+[PASS] test_std_str_parse_i64_overflow_none() (gas: 24838)
+[PASS] test_std_str_parse_i8_min() (gas: 10286)
+[PASS] test_std_str_parse_i8_overflow_none() (gas: 10013)
+[PASS] test_std_str_parse_int_alias() (gas: 8381)
+[PASS] test_std_str_parse_invalid_digit_none() (gas: 9886)
+[PASS] test_std_str_parse_radix2() (gas: 17483)
+[PASS] test_std_str_parse_radix36() (gas: 8033)
+[PASS] test_std_str_parse_u128_max() (gas: 59407)
+[PASS] test_std_str_parse_u128_overflow_none() (gas: 59421)
+[PASS] test_std_str_parse_u16_max() (gas: 13418)
+[PASS] test_std_str_parse_u16_overflow_none() (gas: 13320)
+[PASS] test_std_str_parse_u256_max() (gas: 102836)
+[FAIL: assertion failed] test_std_str_parse_u256_overflow_none() (gas: 96042)
+[PASS] test_std_str_parse_u32_max() (gas: 20237)
+[PASS] test_std_str_parse_u32_overflow_none() (gas: 20141)
+[PASS] test_std_str_parse_u8_max() (gas: 10644)
+[PASS] test_std_str_parse_u8_overflow_none() (gas: 10565)
+[PASS] test_std_str_parse_u8_zero() (gas: 7969)
+[PASS] test_std_str_parse_uint_alias() (gas: 9419)
+[PASS] test_std_str_parse_uint_dec() (gas: 10686)
+[PASS] test_std_str_parse_uint_hex() (gas: 9612)
+[PASS] test_std_str_round_trip() (gas: 19978)
+Suite result: FAILED. 32 passed; 1 failed; 0 skipped; finished in 5.51ms (31.45ms CPU time)
+
+Ran 1 test suite in 16.57ms (5.51ms CPU time): 32 tests passed, 1 failed, 0 skipped (33 total tests)
+
+Failing tests:
+Encountered 1 failing test in test/StdStrMatrix.t.sol:StdStrMatrixTest
+[FAIL: assertion failed] test_std_str_parse_u256_overflow_none() (gas: 96042)
+
+Encountered a total of 1 failing tests, 32 tests succeeded
+
+Tip: Run `forge test --rerun` to retry only the 1 failed test
+
+stderr:
+

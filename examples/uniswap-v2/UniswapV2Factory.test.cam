@@ -1,0 +1,92 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Unit tests for UniswapV2Factory. The `createPair(...)` route includes
+// a `deploy UniswapV2Pair(...)` action, which the auto-`CambrianFactory`
+// resolves to a real CREATE2 deployment — that flow is exercised by the
+// foundry harness, not here. The .test.cam suite covers the route-level
+// `where` guards that revert *before* the deploy action and the simple
+// fee-setter access controls.
+
+test "constructor records fee_to_setter" for UniswapV2Factory {
+    let setter = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    call constructor(setter)
+
+    call feeToSetter()
+    expect return setter
+    call feeTo()
+    expect return 0x0000000000000000000000000000000000000000
+    call allPairsLength()
+    expect return 0
+}
+
+test "createPair with identical tokens throws 1" for UniswapV2Factory {
+    let setter = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let tk     = 0x000000000000000000000000000000000000000000000000000000000000b001
+
+    call constructor(setter)
+    call createPair(tk, tk)
+    expect throw 1
+}
+
+test "createPair with zero tokenA throws 2" for UniswapV2Factory {
+    let setter = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let zero   = 0x0000000000000000000000000000000000000000
+    let tk     = 0x000000000000000000000000000000000000b001
+
+    call constructor(setter)
+    call createPair(zero, tk)
+    expect throw 2
+}
+
+test "createPair with zero tokenB throws 2" for UniswapV2Factory {
+    let setter = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let zero   = 0x0000000000000000000000000000000000000000
+    let tk     = 0x000000000000000000000000000000000000b001
+
+    call constructor(setter)
+    call createPair(tk, zero)
+    expect throw 2
+}
+
+test "setFeeTo by non-setter throws 10" for UniswapV2Factory {
+    let setter   = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let stranger = 0x0000000000000000000000000000000000000000000000000000000000000d09
+    let new_fee  = 0x0000000000000000000000000000000000000000000000000000000000000d02
+
+    call constructor(setter)
+    msg { sender: stranger }
+    call setFeeTo(new_fee)
+    expect throw 10
+}
+
+test "setFeeTo by setter records new fee_to" for UniswapV2Factory {
+    let setter  = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let new_fee = 0x0000000000000000000000000000000000000000000000000000000000000d02
+
+    call constructor(setter)
+    msg { sender: setter }
+    call setFeeTo(new_fee)
+
+    call feeTo()
+    expect return new_fee
+}
+
+test "setFeeToSetter rotates the role" for UniswapV2Factory {
+    let setter1 = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let setter2 = 0x0000000000000000000000000000000000000000000000000000000000000d02
+
+    call constructor(setter1)
+
+    msg { sender: setter1 }
+    call setFeeToSetter(setter2)
+
+    call feeToSetter()
+    expect return setter2
+
+    // Old setter no longer has rights.
+    msg { sender: setter1 }
+    call setFeeTo(0x0000000000000000000000000000000000000000000000000000000000000d03)
+    expect throw 10
+}

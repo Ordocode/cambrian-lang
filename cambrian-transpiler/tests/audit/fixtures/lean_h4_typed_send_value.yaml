@@ -1,0 +1,10 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: lean-h4-audit
+target: lean
+output_dir: build/
+lean:
+  intrinsics: executable
+sources:
+  - lean_h4_typed_send_value.cam

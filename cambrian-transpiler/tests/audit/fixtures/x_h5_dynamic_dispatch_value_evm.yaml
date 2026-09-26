@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: x-h5-evm-audit
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - x_h5_dynamic_dispatch_value.cam

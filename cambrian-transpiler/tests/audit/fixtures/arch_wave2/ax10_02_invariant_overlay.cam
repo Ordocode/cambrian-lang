@@ -1,0 +1,38 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-033 / H-AX-10-02: invariant overlay `deploy` + `ctx { msg::sender }` —
+// Lean ctor bootstrap uses ctx sender; EVM also adds overlay ctx sender to
+// `targetSender`, widening the fuzz projection (PL-F-INV-04-CTX class).
+
+entity CtxProbe {
+    const FUZZ: address = 0x0000000000000000000000000000000000000A01
+    const DEPLOY: address = 0x0000000000000000000000000000000000000D01
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        set(n: u64) => []
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+        in set(n) => n
+    }
+}
+
+invariant "catalog fuzz sender" for CtxProbe {
+    senders { FUZZ }
+
+    action set(n: u64) {
+        bound n in 0..10
+    }
+
+    check m_x <= 10
+}
+
+#[instantiates("catalog fuzz sender")]
+invariant "overlay deploy ctx" for CtxProbe {
+    deploy { DEPLOY }
+    ctx { msg::sender: DEPLOY }
+}

@@ -1,0 +1,724 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Unit tests for ERC4626 — the accounting vault.
+//
+// Same harness shape as `ERC4626Min.test.cam`: every route reads the asset's
+// balance of the vault, so each test stands up a real token, deploys the
+// vault against it, and approves before depositing.
+//
+// Two things here that the minimal suite has no way to express.
+//
+// **The virtual amounts.** Every vault below is deployed with 1000 virtual
+// shares, so the numbers are not the minimal vault's numbers: the first
+// deposit of 100 issues 100 000 shares, not 100, because an empty vault
+// prices `assets · (0 + 1000) / (0 + 1)`. That factor is the point — it is
+// what a donation gets divided by.
+//
+// **The counted amount.** Half the file runs against `FeeAsset`, a fixture
+// that delivers less than it is asked to move. Against a well-behaved token a
+// vault that counts and a vault that trusts the caller's number are
+// indistinguishable, which is why the fixture exists.
+//
+// Asset constructor argument order:
+//   ERC20Multi(name, symbol, decimals, minter, initial_holder, initial_supply)
+//   FeeAsset(holder, supply)   — with { m_fee_bps: ... }
+
+// ---------------------------------------------------------------------
+// The floor on the virtual share amount
+// ---------------------------------------------------------------------
+
+// §7 of the BLS: the argument exists because the right value depends on the
+// asset's decimals, and the floor exists because an argument with no floor is
+// an argument somebody sets to one. At one, zeroing out a victim's deposit
+// costs the attacker about what it costs the victim, which is not a
+// deterrent. The revert below the floor is code 25 in the constructor; it
+// cannot be reached from a test that has to deploy successfully to run, so
+// what is pinned here is the constant the constructor compares against.
+test "the vault reports the floor it was built with" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call minVirtualShares()
+    expect return 1000
+    call virtualShares()
+    expect return 1000
+    // P0-13. Fixed at one, and not a constructor argument: it is there to
+    // make the denominator nonzero, and any larger value would tax every
+    // conversion for no gain.
+    call virtualAssets()
+    expect return 1
+}
+
+// The other side of the same guard. This one does not deploy a peer at all:
+// the subject's own constructor is called directly, which is the only shape
+// in which a constructor revert is observable — a `deploy` binding has to
+// succeed for the rest of the test to have anything to talk to.
+test "a vault below the floor cannot be built" for ERC4626 {
+    call constructor("Vault Share", "vAST", 18, 999)
+    expect throw 25
+}
+
+test "a vault exactly at the floor can be built" for ERC4626 {
+    call constructor("Vault Share", "vAST", 18, 1000)
+    call virtualShares()
+    expect return 1000
+}
+
+test "a vault may be built well above the floor" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000000) with { m_asset: tok }
+
+    call virtualShares()
+    expect return 1000000
+}
+
+// P0-12, mechanically: the member has no transform outside the constructor,
+// and this is the observable form of that.
+test "the virtual share amount survives every route" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call mint(1000, sys::address)
+    call withdraw(5, sys::address, sys::address)
+    call redeem(1000, sys::address, sys::address)
+    call transfer(0x0000000000000000000000000000000000000000000000000000000000000b01, 10)
+    call approve(0x0000000000000000000000000000000000000000000000000000000000000b01, 10)
+
+    call virtualShares()
+    expect return 1000
+}
+
+// ---------------------------------------------------------------------
+// S01 — the empty vault has no branch
+// ---------------------------------------------------------------------
+
+// The minimal vault answers one share per asset here because it special-cases
+// the empty vault. This one has no case to special: `100 · (0 + 1000) / (0 + 1)`
+// is the same expression it will evaluate on the millionth deposit.
+test "the first deposit is priced by the virtual amounts alone" for ERC4626 {
+    let recv = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call previewDeposit(100)
+    expect return 100000
+    call deposit(100, recv)
+    expect return 100000
+
+    call totalSupply()
+    expect return 100000
+    call balanceOf(recv)
+    expect return 100000
+    call totalAssets()
+    expect return 100
+}
+
+// The rate the first deposit established is preserved exactly: 50 assets buy
+// `50 · 101000 / 101` = 50 000 shares with no remainder.
+test "a second deposit at the same rate is exact" for ERC4626 {
+    let recv = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, recv)
+    call deposit(50, recv)
+    expect return 50000
+
+    call totalSupply()
+    expect return 150000
+    call totalAssets()
+    expect return 150
+}
+
+// P0-11 across all four conversions.
+test "every conversion of zero answers zero" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+
+    call convertToShares(0)
+    expect return 0
+    call convertToAssets(0)
+    expect return 0
+    call previewDeposit(0)
+    expect return 0
+    call previewMint(0)
+    expect return 0
+    call previewWithdraw(0)
+    expect return 0
+    call previewRedeem(0)
+    expect return 0
+}
+
+// P1-6 read from the other side: the empty vault is not a special case, so
+// the conversions are defined on it rather than reverting.
+test "the conversions answer on an empty vault" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call totalSupply()
+    expect return 0
+    call convertToShares(7)
+    expect return 7000
+    call convertToAssets(7000)
+    expect return 7
+    call previewWithdraw(1)
+    expect return 1000
+}
+
+// ---------------------------------------------------------------------
+// mint / withdraw / redeem
+// ---------------------------------------------------------------------
+
+test "mint issues exactly the shares asked for" for ERC4626 {
+    let recv = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call previewMint(100000)
+    expect return 100
+    call mint(100000, recv)
+    expect return 100
+
+    call balanceOf(recv)
+    expect return 100000
+    call totalAssets()
+    expect return 100
+}
+
+test "withdraw burns the shares and sends the assets" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call withdraw(40, sys::address, sys::address)
+    expect return 40000
+
+    call totalSupply()
+    expect return 60000
+    call totalAssets()
+    expect return 60
+    call tok.balanceOf(vault)
+    expect return 60
+}
+
+test "redeem burns exactly the shares given" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call redeem(40000, sys::address, sys::address)
+    expect return 40
+
+    call totalSupply()
+    expect return 60000
+    call totalAssets()
+    expect return 60
+}
+
+test "a deposit to the zero address throws 20" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, 0x0000000000000000000000000000000000000000000000000000000000000000)
+    expect throw 20
+}
+
+test "redeeming above the owner's balance throws 21" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call maxRedeem(sys::address)
+    expect return 100000
+    call redeem(100001, sys::address, sys::address)
+    expect throw 21
+}
+
+test "redeeming another address's stake without an allowance throws 22" for ERC4626 {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, owner)
+    call redeem(1000, sys::address, owner)
+    expect throw 22
+}
+
+test "the owner redeems their own stake with no allowance" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call allowance(sys::address, sys::address)
+    expect return 0
+    call redeem(1000, sys::address, sys::address)
+    expect return 1
+}
+
+// ---------------------------------------------------------------------
+// S02 / P0-8 — the donation, and what it costs
+// ---------------------------------------------------------------------
+//
+// The attack the virtual amounts are for, run end to end at the numbers that
+// make it legible. The attacker deposits 1, donates 10 000, the victim
+// deposits 100, and the attacker redeems everything they hold.
+//
+// On the minimal vault this sequence zeroes the victim: their 100 is divided
+// by a balance of 10 001 against a single share and the quotient rounds to
+// nothing. Here the same donation is divided among 1 000 virtual shares the
+// attacker does not hold.
+
+test "a donation does not zero out the next depositor" for ERC4626 {
+    let victim = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    // The attacker's toehold: one asset, one thousand shares.
+    call deposit(1, sys::address)
+    expect return 1000
+    // The donation. No route accepts it, so no share is issued for it.
+    call tok.transfer(vault, 10000)
+    call totalAssets()
+    expect return 10001
+    call totalSupply()
+    expect return 1000
+
+    // The victim's deposit still buys shares: 100 · 2000 / 10002 = 19.
+    call previewDeposit(100)
+    expect return 19
+    call deposit(100, victim)
+    expect return 19
+    call balanceOf(victim)
+    expect return 19
+}
+
+// P0-8 as a number. The attacker put in 10 001 and gets back 5 003 — the rest
+// went to holders who do not exist. That is the bound §7 states: the attack is
+// priced, not prevented.
+test "the donor recovers less than they put in" for ERC4626 {
+    let victim = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(1, sys::address)
+    call tok.transfer(vault, 10000)
+    call deposit(100, victim)
+
+    call maxRedeem(sys::address)
+    expect return 1000
+    call redeem(1000, sys::address, sys::address)
+    expect return 5003
+}
+
+// The other half of the same statement, and the one that matters to a holder
+// who was already there: the donation raised the value of their share rather
+// than being recoverable by the donor. S06.
+test "a donation raises the value of an existing share" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call convertToAssets(100000)
+    expect return 100
+
+    call tok.transfer(vault, 250)
+    // Same 100 000 shares, more assets behind them — though not all 350 of
+    // them, because the virtual shares take their cut of the donation too.
+    call totalSupply()
+    expect return 100000
+    call convertToAssets(100000)
+    expect return 347
+}
+
+// ---------------------------------------------------------------------
+// Rounding, at a rate that separates the four directions
+// ---------------------------------------------------------------------
+//
+// 100 000 shares against 350 assets, reached the same way as in the minimal
+// suite: deposit 100, then transfer 250 straight in. Every conversion below
+// is inexact.
+
+test "previewDeposit rounds the shares down and previewWithdraw rounds them up" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    // 10 · 101000 / 351 = 2877.49…
+    call previewDeposit(10)
+    expect return 2877
+    call previewWithdraw(10)
+    expect return 2878
+    call convertToShares(10)
+    expect return 2877
+}
+
+test "previewMint rounds the assets up and previewRedeem rounds them down" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    // 3000 · 351 / 101000 = 10.42…
+    call previewMint(3000)
+    expect return 11
+    call previewRedeem(3000)
+    expect return 10
+    call convertToAssets(3000)
+    expect return 10
+}
+
+// P0-2 … P0-5 pair each preview with the write that has to agree with it.
+test "each write answers what its preview promised" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call previewDeposit(10)
+    expect return 2877
+    call deposit(10, sys::address)
+    expect return 2877
+}
+
+test "withdraw answers what previewWithdraw promised" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call previewWithdraw(10)
+    expect return 2878
+    call withdraw(10, sys::address, sys::address)
+    expect return 2878
+}
+
+// S05: the remainder resolves against the caller, so the burn is one share
+// above the quotient and the vault keeps the difference.
+test "withdraw burns one share above the exact quotient" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call convertToShares(10)
+    expect return 2877
+    call withdraw(10, sys::address, sys::address)
+    expect return 2878
+
+    call totalSupply()
+    expect return 97122
+    call totalAssets()
+    expect return 340
+}
+
+// P0-10, the round trip. A deposit and an immediate redeem of exactly the
+// shares it issued cannot answer more than went in — anything else is value
+// created by rounding.
+test "deposit then redeem returns no more than was deposited" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call deposit(10, sys::address)
+    expect return 2877
+    call redeem(2877, sys::address, sys::address)
+    expect return 9
+}
+
+// A redemption too small to be worth one asset pays out zero, and the vault
+// then asks the asset to move zero. Whether that succeeds is the asset's
+// decision — `ERC20Multi` rejects it with code 1, as does a small family of
+// real tokens — so a dust redemption reverts through the vault rather than
+// burning shares for nothing.
+//
+// The vault could branch on a zero payout and skip the transfer. It does not,
+// and the reason is the one running through this whole entity: that is a
+// branch on a state the common path never enters, and the alternative — the
+// caller learns their redemption was worthless by having it revert — is the
+// better failure. `stdlib/bls/erc4626.md` §6 assumes a conforming ERC-20 and
+// says nothing about zero transfers, so this is the asset's rule surfacing,
+// not a claim of the vault's being broken.
+test "a redemption too small to pay one asset reverts through the asset" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    // 287 shares are worth 0.997 assets at this rate; 288 are worth one.
+    call previewRedeem(287)
+    expect return 0
+    call previewRedeem(288)
+    expect return 1
+
+    call redeem(287, sys::address, sys::address)
+    expect throw 1
+}
+
+test "the smallest redemption worth one asset goes through" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call redeem(288, sys::address, sys::address)
+    expect return 1
+    call totalSupply()
+    expect return 99712
+}
+
+// ---------------------------------------------------------------------
+// S08 — limits
+// ---------------------------------------------------------------------
+
+test "the deposit side is uncapped and the exit side tracks the rate" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    call maxDeposit(sys::address)
+    expect return 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+    call maxMint(sys::address)
+    expect return 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+    // The vault holds 350 but the sole holder can only take 347 of it: the
+    // virtual shares hold the remainder, which is exactly the mechanism.
+    call totalAssets()
+    expect return 350
+    call maxWithdraw(sys::address)
+    expect return 347
+    call withdraw(347, sys::address, sys::address)
+    expect return 99850
+}
+
+test "one unit above maxWithdraw throws 21" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call tok.transfer(vault, 250)
+
+    // The vault holds 348, so 23 is satisfied; the burn it would take is
+    // 100 137 and the owner holds 100 000.
+    call withdraw(348, sys::address, sys::address)
+    expect throw 21
+}
+
+// ---------------------------------------------------------------------
+// S03 / P0-6 / P0-7 — the counted amount
+// ---------------------------------------------------------------------
+//
+// Against `FeeAsset` at 100 bps a caller who moves 100 delivers 99. A vault
+// that credits the request would issue 100 000 shares against 99 assets and
+// every existing holder would pay the difference. This vault reads its own
+// balance either side of the pull and issues against what arrived.
+
+test "a deposit is credited what arrived, not what was asked" for ERC4626 {
+    deploy fee = FeeAsset(sys::address, 1000000) with { m_fee_bps: 100 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: fee }
+
+    call fee.approve(vault, 1000000)
+
+    // What the standard's read side promises, in the absence of any way to
+    // express a fee: 100 assets would be 100 000 shares.
+    call previewDeposit(100)
+    expect return 100000
+
+    // What the write actually issues: 99 arrived, so 99 000.
+    call deposit(100, sys::address)
+    expect return 99000
+
+    call totalSupply()
+    expect return 99000
+    call totalAssets()
+    expect return 99
+    call fee.balanceOf(vault)
+    expect return 99
+}
+
+// P0-7 stated as the negative it is: the answer is not the requested amount's
+// conversion, and the ledger agrees with the answer rather than with the
+// preview.
+test "the fee is borne by the depositor, not by the vault" for ERC4626 {
+    let first = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    deploy fee = FeeAsset(sys::address, 1000000) with { m_fee_bps: 100 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: fee }
+
+    call fee.approve(vault, 1000000)
+    call deposit(100, first)
+    // The first holder is whole against what the vault holds.
+    call convertToAssets(99000)
+    expect return 99
+
+    call deposit(100, sys::address)
+    // And still whole after the second deposit — the second depositor's fee
+    // did not come out of the first one's stake.
+    call convertToAssets(99000)
+    expect return 99
+}
+
+// The `mint` side has no honest way to absorb a short delivery: the caller
+// named a share amount and the vault must issue exactly that many, so a
+// shortfall would be charged to the existing holders. Code 26 instead.
+test "mint reverts when the asset delivers less than it priced" for ERC4626 {
+    deploy fee = FeeAsset(sys::address, 1000000) with { m_fee_bps: 100 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: fee }
+
+    call fee.approve(vault, 1000000)
+    call mint(100000, sys::address)
+    expect throw 26
+}
+
+// A zero-fee fixture is the control: the same fixture, the same routes, and
+// the counting path agrees with the trusting one when there is nothing to
+// count. Without this the test above only shows that `FeeAsset` is different,
+// not that the vault handles it correctly.
+test "with no fee the counted amount is the requested amount" for ERC4626 {
+    deploy fee = FeeAsset(sys::address, 1000000) with { m_fee_bps: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: fee }
+
+    call fee.approve(vault, 1000000)
+    call previewDeposit(100)
+    expect return 100000
+    call deposit(100, sys::address)
+    expect return 100000
+    call mint(50000, sys::address)
+    expect return 50
+}
+
+// ---------------------------------------------------------------------
+// P1-5 — the share is an ERC-20
+// ---------------------------------------------------------------------
+
+test "shares transfer like a token" for ERC4626 {
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call transfer(bob, 30000)
+
+    call balanceOf(sys::address)
+    expect return 70000
+    call balanceOf(bob)
+    expect return 30000
+    call totalSupply()
+    expect return 100000
+}
+
+// P0-9: the ledger sums to the supply, and a self-transfer is the case that
+// breaks that when the two updates are computed against the same pre-state.
+test "a share transfer to yourself is a no-op" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call transfer(sys::address, 40000)
+
+    call balanceOf(sys::address)
+    expect return 100000
+    call totalSupply()
+    expect return 100000
+}
+
+test "a share transfer above the balance throws 2" for ERC4626 {
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+    call transfer(bob, 100001)
+    expect throw 2
+}
+
+test "the share metadata is the vault's own" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 6, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 6, 1000) with { m_asset: tok }
+
+    call name()
+    expect return "Vault Share"
+    call symbol()
+    expect return "vAST"
+    call decimals()
+    expect return 6
+    call asset()
+    expect return tok
+}
+
+// ---------------------------------------------------------------------
+// The read routes write nothing
+// ---------------------------------------------------------------------
+
+test "the read routes leave the ledger alone" for ERC4626 {
+    deploy tok = ERC20Multi("Asset", "AST", 18, 0x0000000000000000000000000000000000000000000000000000000000000000, sys::address, 1000000) with { m_token_id: 0 }
+    deploy vault = ERC4626("Vault Share", "vAST", 18, 1000) with { m_asset: tok }
+
+    call tok.approve(vault, 1000000)
+    call deposit(100, sys::address)
+
+    call totalAssets()
+    call convertToShares(7)
+    call convertToAssets(7)
+    call previewDeposit(7)
+    call previewMint(7)
+    call previewWithdraw(7)
+    call previewRedeem(7)
+    call maxWithdraw(sys::address)
+    call virtualShares()
+    call minVirtualShares()
+
+    expect state { m_total_supply: 100000 }
+    call totalAssets()
+    expect return 100
+}

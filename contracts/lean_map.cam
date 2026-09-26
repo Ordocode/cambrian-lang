@@ -1,0 +1,11 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// P4b smoke: HashMap<address, u64> lowers to Cambrian.AddressMap.
+
+entity Registry {
+    routes {
+        constructor() => []
+    }
+    m_balances: HashMap<address, u64> {}
+}

@@ -1,0 +1,139 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for NftCollection — NFT ownership, transfer, approve, burn
+
+test "constructor sets collection metadata" for NftCollection {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    msg { sender: owner }
+    call constructor("CoolNFTs", "CNFT")
+    expect state { m_total_supply: 0 }
+}
+
+test "mint creates a new token" for NftCollection {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: owner }
+    call constructor("CoolNFTs", "CNFT")
+
+    msg { sender: owner }
+    call mint(alice, 1, "ipfs://token1")
+    expect state { m_total_supply: 1 }
+}
+
+test "mint by non-owner throws" for NftCollection {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: owner }
+    call constructor("CoolNFTs", "CNFT")
+
+    msg { sender: alice }
+    call mint(alice, 1, "ipfs://token1")
+    expect throw 1
+}
+
+test "mint duplicate token id throws" for NftCollection {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: owner }
+    call constructor("CoolNFTs", "CNFT")
+
+    msg { sender: owner }
+    call mint(alice, 1, "ipfs://token1")
+
+    msg { sender: owner }
+    call mint(alice, 1, "ipfs://duplicate")
+    expect throw 3
+}
+
+test "transfer moves ownership" for NftCollection {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000003
+
+    msg { sender: owner }
+    call constructor("CoolNFTs", "CNFT")
+
+    msg { sender: owner }
+    call mint(alice, 1, "ipfs://token1")
+
+    call transfer(alice, bob, 1)
+    expect state { m_total_supply: 1 }
+}
+
+test "transfer to self throws" for NftCollection {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: owner }
+    call constructor("CoolNFTs", "CNFT")
+
+    msg { sender: owner }
+    call mint(alice, 1, "ipfs://token1")
+
+    call transfer(alice, alice, 1)
+    expect throw 5
+}
+
+test "transfer nonexistent token throws" for NftCollection {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: owner }
+    call constructor("CoolNFTs", "CNFT")
+
+    call transfer(alice, owner, 999)
+    expect throw 4
+}
+
+test "burn decreases supply" for NftCollection {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: owner }
+    call constructor("CoolNFTs", "CNFT")
+
+    msg { sender: owner }
+    call mint(alice, 1, "ipfs://token1")
+    expect state { m_total_supply: 1 }
+
+    call burn(1)
+    expect state { m_total_supply: 0 }
+}
+
+test "burn nonexistent token throws" for NftCollection {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    msg { sender: owner }
+    call constructor("CoolNFTs", "CNFT")
+
+    call burn(999)
+    expect throw 4
+}
+
+test "totalSupply tracks mints and burns" for NftCollection {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: owner }
+    call constructor("CoolNFTs", "CNFT")
+
+    call totalSupply()
+    expect return 0
+
+    msg { sender: owner }
+    call mint(alice, 1, "ipfs://a")
+
+    msg { sender: owner }
+    call mint(alice, 2, "ipfs://b")
+
+    call totalSupply()
+    expect return 2
+
+    call burn(1)
+    call totalSupply()
+    expect return 1
+}

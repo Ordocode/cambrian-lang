@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-O-006: `/` not in checked lowering under `lean.numerics: overflow-panic`.
+
+entity DivByZero {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        divByZero() -> u64 => [
+            return(m_a / m_b)
+        ]
+    }
+
+    m_a: u64 {
+        in constructor() => 1
+    }
+
+    m_b: u64 {
+        in constructor() => 0
+    }
+}

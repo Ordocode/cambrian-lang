@@ -1,0 +1,61 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Phase EVM-P0-C: ERC20-style fixture exercising entity-scope events
+// (`event Transfer(...)`, `event Approval(...)`) and `emit` route actions.
+// Round-tripped through `solc` by `evm_p0_c_solc_round_trip_erc20_events`.
+
+pure fn balance_of(balances: HashMap<address, U256>, owner: address) -> U256 {
+    if balances.exists(owner) { balances[owner] } else { 0 }
+}
+
+entity Erc20Events {
+    const ZERO: address = 0x0000000000000000000000000000000000000000
+
+    event Transfer(indexed src: address, indexed dst: address, value: U256);
+    event Approval(indexed owner: address, indexed spender: address, value: U256);
+
+    routes {
+        constructor(initial_supply: U256) => [
+            emit Transfer(ZERO, msg::sender, initial_supply);
+        ]
+
+        transfer(to: address, amount: U256)
+            where amount > 0 : throw 1 => [
+                emit Transfer(msg::sender, to, amount);
+            ]
+
+        approve(spender: address, amount: U256) => [
+            emit Approval(msg::sender, spender, amount);
+        ]
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+    }
+
+    m_total: U256 {
+        in constructor(initial_supply) => initial_supply
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(initial_supply) => {
+            let sender = msg::sender;
+            {}.insert(sender, initial_supply)
+        }
+        // Both balances are read before either is written, so when payer and
+        // payee are the same address the credit overwrites the debit and the
+        // account gains `amount` out of nothing. A self-transfer moves nothing,
+        // so returning the map untouched is also the right semantics.
+        in transfer(to, amount) => {
+            let sender = msg::sender;
+            let sender_bal = balance_of(m_balances, sender);
+            let to_bal = balance_of(m_balances, to);
+            if to == sender { m_balances } else {
+                m_balances
+                    .update(sender, sender_bal - amount)
+                    .update(to, to_bal + amount)
+            }
+        }
+    }
+}

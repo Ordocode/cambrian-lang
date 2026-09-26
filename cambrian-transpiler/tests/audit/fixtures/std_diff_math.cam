@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-STD-DIFF-001: shared std::math differential gate (EVM forge vs Lean inspect).
+
+entity StdDiffMath {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        runMuldiv() -> u64 => [
+            return(std::math::muldiv(100, 200, 50))
+        ]
+
+        runClamp() -> u64 => [
+            return(std::math::clamp(150, 0, 100))
+        ]
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+    }
+}

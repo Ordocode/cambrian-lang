@@ -1,0 +1,65 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Upgradeable — constructor, increment, updateCode, views
+
+test "constructor sets owner and count" for Upgradeable {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    msg { pubkey: 0x0000000000000000000000000000000000000000000000000000000000000001 }
+    call constructor(owner)
+    expect state { m_count: 0 }
+}
+
+test "increment adds to count" for Upgradeable {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    msg { pubkey: 0x0000000000000000000000000000000000000000000000000000000000000001 }
+    call constructor(owner)
+
+    call increment(5)
+    expect state { m_count: 5 }
+
+    call increment(3)
+    expect state { m_count: 8 }
+}
+
+test "getCount returns current count" for Upgradeable {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    msg { pubkey: 0x0000000000000000000000000000000000000000000000000000000000000001 }
+    call constructor(owner)
+
+    call increment(10)
+    call getCount()
+    expect return 10
+}
+
+test "increment then getCount" for Upgradeable {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    msg { pubkey: 0x0000000000000000000000000000000000000000000000000000000000000001 }
+    call constructor(owner)
+
+    call increment(7)
+    call increment(3)
+    call getCount()
+    expect return 10
+}
+
+test "updateCode by non-owner throws" for Upgradeable {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    msg { pubkey: 0x0000000000000000000000000000000000000000000000000000000000000001 }
+    call constructor(owner)
+
+    msg { pubkey: 0x0000000000000000000000000000000000000000000000000000000000000099 }
+    call updateCode(0x00, 0x0000000000000000000000000000000000000000000000000000000000000002, 0x00)
+    expect throw 100
+}
+
+test "updateCode by owner produces commit and updateCode effects" for Upgradeable {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let new_wasm_hash = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let new_owner = 0x00000000000000000000000000000000000000000000000000000000000000FF
+    msg { pubkey: 0x0000000000000000000000000000000000000000000000000000000000000001 }
+    call constructor(owner)
+
+    call updateCode(0x00, new_wasm_hash, cam_encode<U256>(new_owner))
+    expect effects [commit(), ..]
+}

@@ -1,0 +1,24 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// BUG-U4 regression: init-route param (holder) must receive mint via factory.deploy*(holder).
+
+entity MintProbe {
+    const SUPPLY: u64 = 1000
+
+    routes {
+        #[factory_only]
+        constructor(holder: address) => []
+
+        view holder() -> address => [ return(m_holder) ]
+        view supply() -> u64 => [ return(m_supply) ]
+    }
+
+    m_holder: address {
+        in constructor(holder) => holder
+    }
+
+    m_supply: u64 {
+        in constructor(holder) => SUPPLY
+    }
+}

@@ -1,0 +1,31 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-STD-NATIVE-001 / PM-021: typed send payload must not use fail-open bincode.
+
+entity Callee {
+    identity cid: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+        ping(v: u64) => []
+    }
+
+    m_x: u64 {
+        in create() => 0
+        in ping(v) => m_x + v
+    }
+}
+
+entity Caller {
+    routes {
+        #[factory_only]
+        init create() => []
+        go(cid: u64, v: u64) => [
+            ping(v) ~> Callee.address(cid)
+        ]
+    }
+
+    m_n: u64 {}
+}

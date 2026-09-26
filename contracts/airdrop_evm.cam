@@ -1,0 +1,34 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// EVM-12 Batch E action-level `for` fixture.
+//
+// `for <pat> in <iter> => [ <actions> ]` lowers to a Solidity `for`
+// loop in the route handler, with the body actions emitted once per
+// iteration. The iterator may be a route parameter Vec, a range, or
+// (with HashMap iteration enabled) a `m.iter()` over a state member.
+//
+// Validator V29 forbids `var` calls / `return` / `update_code` inside
+// the loop body so EVM ordering invariants stay intact: only effects
+// (sends, state writes, deploys, lets) may iterate.
+
+entity Airdrop {
+
+    routes {
+        constructor() => []
+
+        // Vec route param: airdrop a fixed amount to every recipient.
+        airdrop(amount: uint256, recipients: Vec<address>) => [
+            for r in recipients => [
+                ~> r with {value: amount}
+            ]
+        ]
+
+        // Range iteration mixed with a guard expressed via `if`.
+        ping(n: uint256, target: address) => [
+            for _ in 0..n => [
+                ~> target with {value: 1}
+            ]
+        ]
+    }
+}

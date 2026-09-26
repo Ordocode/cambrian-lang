@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: arch-ax10-02-lean
+target: lean
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - ax10_02_invariant_overlay.cam

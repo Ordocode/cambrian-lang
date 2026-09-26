@@ -1,0 +1,19 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H15: deterministic codegen emits route names
+// without sol_sanitize_ident (e.g. Solidity keyword `assembly`).
+
+entity Opcode {
+    routes {
+        #[factory_only]
+        constructor() => []
+        assembly(x: u64) -> u64 => [
+            return(x + 1)
+        ]
+    }
+
+    m_v: u64 {
+        in constructor() => 0
+    }
+}

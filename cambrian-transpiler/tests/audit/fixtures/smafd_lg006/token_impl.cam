@@ -1,0 +1,22 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Minimal RHTBurn slice for LG-006 lake gate (claim route triggers sorry-stub).
+entity Token {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        transfer(to: address, amount: u64) => []
+        approve(spender: address, amount: u64) => []
+        transferFrom(from_addr: address, to: address, amount: u64) => []
+
+        claim() => []
+
+        view totalSupply() -> u64 => [ return(m_supply) ]
+    }
+
+    m_supply: u64 {
+        in constructor() => 1000
+    }
+}

@@ -1,0 +1,125 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Unit tests for TimelockController. Cover the role-gated state
+// transitions and the `sys::timestamp + delay` deadline that
+// `schedule(...)` records into `m_op_timestamp`.
+
+test "constructor stores roles and min delay" for TimelockController {
+    let proposer  = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let executor  = 0x0000000000000000000000000000000000000000000000000000000000000b02
+    let canceller = 0x0000000000000000000000000000000000000000000000000000000000000b03
+
+    call constructor(3600, proposer, executor, canceller)
+
+    call minDelay()
+    expect return 3600
+    call proposer()
+    expect return proposer
+    call executor()
+    expect return executor
+    call canceller()
+    expect return canceller
+}
+
+test "schedule by non-proposer throws" for TimelockController {
+    let proposer  = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let executor  = 0x0000000000000000000000000000000000000000000000000000000000000b02
+    let canceller = 0x0000000000000000000000000000000000000000000000000000000000000b03
+    let stranger  = 0x0000000000000000000000000000000000000000000000000000000000000b09
+    let target    = 0x0000000000000000000000000000000000000000000000000000000000000b04
+    let data      = b""
+
+    call constructor(0, proposer, executor, canceller)
+    msg { sender: stranger }
+    call schedule(target, 0, data, 0, 1, 0)
+    expect throw 1
+}
+
+test "schedule with sub-min-delay throws" for TimelockController {
+    let proposer  = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let executor  = 0x0000000000000000000000000000000000000000000000000000000000000b02
+    let canceller = 0x0000000000000000000000000000000000000000000000000000000000000b03
+    let target    = 0x0000000000000000000000000000000000000000000000000000000000000b04
+    let data      = b""
+
+    call constructor(60, proposer, executor, canceller)
+    msg { sender: proposer }
+    call schedule(target, 0, data, 0, 1, 30)
+    expect throw 2
+}
+
+test "execute by non-executor throws" for TimelockController {
+    let proposer  = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let executor  = 0x0000000000000000000000000000000000000000000000000000000000000b02
+    let canceller = 0x0000000000000000000000000000000000000000000000000000000000000b03
+    let stranger  = 0x0000000000000000000000000000000000000000000000000000000000000b09
+    let target    = 0x0000000000000000000000000000000000000000000000000000000000000b04
+    let data      = b""
+
+    call constructor(0, proposer, executor, canceller)
+    msg { sender: proposer }
+    call schedule(target, 0, data, 0, 1, 0)
+
+    msg { sender: stranger }
+    call execute(target, 0, data, 0, 1)
+    expect throw 3
+}
+
+test "cancel non-pending throws" for TimelockController {
+    let proposer  = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let executor  = 0x0000000000000000000000000000000000000000000000000000000000000b02
+    let canceller = 0x0000000000000000000000000000000000000000000000000000000000000b03
+
+    call constructor(0, proposer, executor, canceller)
+    msg { sender: canceller }
+    call cancel(0xdeadbeef)
+    expect throw 5
+}
+
+// `schedule(...)` writes `m_op_timestamp[id] = sys::timestamp + delay`.
+// Verifies that the timestamp arithmetic in transform-RHS position
+// reaches the storage slot intact (regression for the historical
+// "sys::timestamp drops to 0 in transforms" gap).
+test "schedule records ready-at as now + delay" for TimelockController {
+    let proposer  = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let executor  = 0x0000000000000000000000000000000000000000000000000000000000000b02
+    let canceller = 0x0000000000000000000000000000000000000000000000000000000000000b03
+    let target    = 0x0000000000000000000000000000000000000000000000000000000000000b04
+    let data      = b""
+
+    sys { now: 1000 }
+    call constructor(60, proposer, executor, canceller)
+    msg { sender: proposer }
+    call schedule(target, 0, data, 0, 1, 120)
+
+    let id = hashOf(target, 0, data, 0, 1)
+    call operationReadyAt(id)
+    expect return 1120
+    call operationState(id)
+    expect return OpState::Pending
+}
+
+// `cancel(...)` of a Pending op flips state to Cancelled. Confirms the
+// id-based state-machine writes go through cleanly (regression for the
+// "if/else inside transform body drops to no-op" gap, as the
+// downstream settle-style branches in Governor share the same lowering
+// path).
+test "cancel pending records Cancelled" for TimelockController {
+    let proposer  = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let executor  = 0x0000000000000000000000000000000000000000000000000000000000000b02
+    let canceller = 0x0000000000000000000000000000000000000000000000000000000000000b03
+    let target    = 0x0000000000000000000000000000000000000000000000000000000000000b04
+    let data      = b""
+
+    call constructor(0, proposer, executor, canceller)
+    msg { sender: proposer }
+    call schedule(target, 0, data, 0, 1, 0)
+
+    let id = hashOf(target, 0, data, 0, 1)
+    msg { sender: canceller }
+    call cancel(id)
+
+    call operationState(id)
+    expect return OpState::Cancelled
+}

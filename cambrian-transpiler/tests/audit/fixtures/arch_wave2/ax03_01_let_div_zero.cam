@@ -1,0 +1,24 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-001 / H-AX-03-01: div-by-zero in `let` before `return` (not direct return).
+
+entity LetDivZero {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        split() -> u64 => [
+            let q = m_a / m_b;
+            return(q)
+        ]
+    }
+
+    m_a: u64 {
+        in constructor() => 1
+    }
+
+    m_b: u64 {
+        in constructor() => 0
+    }
+}

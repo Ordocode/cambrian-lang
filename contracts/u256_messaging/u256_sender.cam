@@ -1,0 +1,21 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Minimal sender for U256 inter-contract messaging regression test.
+// Sends acceptAmount(U256) to a typed Address<U256Receiver>.
+
+entity U256Sender {
+    routes {
+        constructor() => []
+        sendAmount(dest: Address<U256Receiver>, amount: U256) => [
+            acceptAmount(amount) ~> dest
+        ]
+        getSent() -> U256 => [
+            return(m_last_sent)
+        ]
+    }
+    m_last_sent: U256 {
+        in constructor() => 0
+        in sendAmount(_, amount) => amount
+    }
+}

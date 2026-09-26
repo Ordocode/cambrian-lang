@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pn-diff-extern-evm
+target: evm
+output_dir: build/
+deterministic_addresses: true
+sources:
+  - pn_diff_extern_revert.cam

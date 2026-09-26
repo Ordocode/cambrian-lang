@@ -1,0 +1,28 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PN-104: guarded bump + #[fail_on_revert] → okAnd (not okImplies).
+
+entity Guarded {
+    routes {
+        #[factory_only]
+        init create() => []
+        bump() where m_count < 5 : throw 1 => []
+        getCount() -> u64 => [ return(m_count) ]
+    }
+
+    m_count: u64 {
+        in create() => 0
+        in bump() => m_count + 1
+    }
+}
+
+invariant "count_never_exceeds_3" for Guarded
+    #[fail_on_revert]
+{
+    init { m_count: 0 }
+
+    action bump() { }
+
+    check m_count <= 3
+}

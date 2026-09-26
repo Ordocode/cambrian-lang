@@ -1,0 +1,122 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Stateful invariants for ERC4626.
+//
+// Same harness constraint as the minimal vault's invariants and the same
+// consequence: the fuzzer's senders hold no asset and no approval, because
+// instances are deployed by the harness and their mappings cannot be seeded.
+// Rather than write invariants that pass over a contract nothing touched, the
+// three below make that the claim — every route that could move the share
+// supply is driven, and none of them may.
+//
+// Both instances are declared together so the vault's identity can be pinned
+// at the token instance (`init vlt { m_asset: tok }`). Pinned at a literal
+// address instead, the first `balanceOf(sys::address) ~> m_asset` read reverts
+// into an account with no code, every action is skipped under
+// `fail_on_revert: false`, and the checks hold vacuously.
+
+// The supply is created by `deposit` and `mint` and destroyed by `withdraw`
+// and `redeem`, and all four are behind an asset movement the fuzzer cannot
+// perform. An implementation that credited the shares before the pull, or
+// that ignored a `false` from the asset, breaks this on the first draw.
+invariant "no vault share exists without an asset" for { tok: ERC20Multi, vlt: ERC4626 } {
+    init tok { m_token_id: 0, m_total_supply: 1000000 }
+    init vlt { m_asset: tok, m_virtual_shares: 1000 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000d01,
+        0x0000000000000000000000000000000000000000000000000000000000000d02
+    }
+
+    action vlt.deposit(assets: U256, receiver: address) {
+        bound assets in 0..1000000
+    }
+    action vlt.mint(shares: U256, receiver: address) {
+        bound shares in 0..1000000
+    }
+    action vlt.withdraw(assets: U256, receiver: address, owner: address) {
+        bound assets in 0..1000000
+    }
+    action vlt.redeem(shares: U256, receiver: address, owner: address) {
+        bound shares in 0..1000000
+    }
+    action vlt.transfer(to: address, amount: U256) {
+        bound amount in 0..1000000
+    }
+    action vlt.approve(spender: address, amount: U256) {
+        bound amount in 0..1000000
+    }
+
+    check vlt.m_total_supply == 0
+}
+
+// P0-12 as a stateful claim rather than a per-call one. The virtual share
+// amount is written by the constructor and by nothing else; if any route
+// wrote it, the dilution the whole entity is built on would be adjustable by
+// whoever called that route, which is the same thing as not having it.
+//
+// The amount is checked against the exact value the pin set rather than
+// against a bound, because "did not move" is the property and any inequality
+// would leave room for a route that moved it in the safe direction.
+invariant "the virtual share amount is fixed at construction" for { tok: ERC20Multi, vlt: ERC4626 } {
+    init tok { m_token_id: 0, m_total_supply: 1000000 }
+    init vlt { m_asset: tok, m_virtual_shares: 4242 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000d01,
+        0x0000000000000000000000000000000000000000000000000000000000000d02
+    }
+
+    action vlt.deposit(assets: U256, receiver: address) {
+        bound assets in 0..1000000
+    }
+    action vlt.mint(shares: U256, receiver: address) {
+        bound shares in 0..1000000
+    }
+    action vlt.redeem(shares: U256, receiver: address, owner: address) {
+        bound shares in 0..1000000
+    }
+    action vlt.approve(spender: address, amount: U256) {
+        bound amount in 0..1000000
+    }
+    action vlt.transfer(to: address, amount: U256) {
+        bound amount in 0..1000000
+    }
+    action tok.transfer(to: address, amount: U256) {
+        bound amount in 0..1000000
+    }
+
+    check vlt.m_virtual_shares == 4242
+}
+
+// The asset is an identity: it participates in the address derivation, so a
+// route that moved it would be answering for a vault that could not exist at
+// that address. No member of the token holds its own address, so the
+// comparison this would like to make is not expressible; what is expressible
+// is that the pointer is still a nonzero address, which is what a route
+// writing a caller-supplied value or clearing it would break.
+invariant "the accounting vault never repoints at another asset" for { tok: ERC20Multi, vlt: ERC4626 } {
+    init tok { m_token_id: 0, m_total_supply: 500 }
+    init vlt { m_asset: tok, m_virtual_shares: 1000 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000d01
+    }
+
+    action vlt.approve(spender: address, amount: U256) {
+        bound amount in 0..1000
+    }
+    action vlt.transfer(to: address, amount: U256) {
+        bound amount in 0..1000
+    }
+    action tok.transfer(to: address, amount: U256) {
+        bound amount in 0..1000
+    }
+    action vlt.deposit(assets: U256, receiver: address) {
+        bound assets in 0..1000
+    }
+
+    check vlt.m_asset != 0x0000000000000000000000000000000000000000000000000000000000000000
+    check tok.m_total_supply == 500
+}

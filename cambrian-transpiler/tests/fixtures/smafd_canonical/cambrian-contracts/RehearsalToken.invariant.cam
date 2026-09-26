@@ -1,0 +1,7 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Stateful supplemental invariant — links catalog INV-RHT-001 with init delta.
+invariant "CP-001 stateful fixed total supply" #[instantiates("INV-RHT-001")] for RehearsalToken {
+    init { m_total_supply: INITIAL_SUPPLY }
+}

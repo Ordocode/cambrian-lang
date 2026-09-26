@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: arch-ax08-03-evm
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - ax08_03_multi_from_throw.cam

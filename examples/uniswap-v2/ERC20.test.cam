@@ -1,0 +1,174 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Unit tests for ERC20 — multi-instance test token used by the
+// Uniswap V2 example. Verifies balance accounting, allowances, the
+// `transfer` / `transferFrom` / `approve` happy paths, and the per-
+// route `where` guards.
+//
+// Address constants are kept symmetrical with the rest of the example.
+// `token_id: u8` is supplied to `constructor(...)` indirectly via
+// `Entity.address(token_id)` in the foundry harness; the .test.cam
+// suite is single-contract so we just exercise the routes.
+
+test "constructor mints initial supply to holder" for ERC20 {
+    let holder = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor(holder, 1000000)
+    expect state { m_total_supply: 1000000 }
+
+    call balanceOf(holder)
+    expect return 1000000
+
+    call totalSupply()
+    expect return 1000000
+}
+
+test "transfer moves balance" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(alice, 1000)
+
+    msg { sender: alice }
+    call transfer(bob, 250)
+
+    call balanceOf(alice)
+    expect return 750
+    call balanceOf(bob)
+    expect return 250
+}
+
+test "transfer of zero throws 1" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(alice, 1000)
+    msg { sender: alice }
+    call transfer(bob, 0)
+    expect throw 1
+}
+
+test "transfer over balance throws 2" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(alice, 1000)
+    msg { sender: alice }
+    call transfer(bob, 1001)
+    expect throw 2
+}
+
+test "approve records allowance" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(alice, 1000)
+    msg { sender: alice }
+    call approve(bob, 400)
+
+    call allowance(alice, bob)
+    expect return 400
+}
+
+test "transferFrom drains allowance and balance" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol = 0x0000000000000000000000000000000000000000000000000000000000000a03
+
+    call constructor(alice, 1000)
+
+    msg { sender: alice }
+    call approve(bob, 400)
+
+    msg { sender: bob }
+    call transferFrom(alice, carol, 250)
+
+    call balanceOf(alice)
+    expect return 750
+    call balanceOf(carol)
+    expect return 250
+    call allowance(alice, bob)
+    expect return 150
+}
+
+test "transferFrom over allowance throws 3" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol = 0x0000000000000000000000000000000000000000000000000000000000000a03
+
+    call constructor(alice, 1000)
+
+    msg { sender: alice }
+    call approve(bob, 100)
+
+    msg { sender: bob }
+    call transferFrom(alice, carol, 500)
+    expect throw 3
+}
+
+test "mint grows total supply" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(alice, 100)
+    call mint(bob, 200)
+
+    call totalSupply()
+    expect return 300
+    call balanceOf(bob)
+    expect return 200
+}
+
+test "burn shrinks total supply" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor(alice, 1000)
+    msg { sender: alice }
+    call burn(400)
+
+    call totalSupply()
+    expect return 600
+    call balanceOf(alice)
+    expect return 600
+}
+
+// EIP-2612 permit — rejection paths.
+//
+// Producing a *valid* signature inside a `.test.cam` would require a
+// crypto/signing primitive that the test syntax doesn't expose; so we
+// only assert the two predictable failure modes (expired deadline,
+// signature that doesn't recover to `owner`). The signature math itself
+// is exercised end-to-end by Solidity-side fixtures in the wider
+// uniswap-v2 e2e harness.
+
+test "permit_expired_throw_4" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    // B-18 fix: default timestamp is 0, so deadline=0 never expires.
+    // Warp the clock and use a strictly earlier deadline.
+    sys { timestamp: 100 }
+    call constructor(alice, 1000)
+    call permit(alice, bob, 500, 50, 27, 1, 1)
+    expect throw 4
+}
+
+test "permit_invalid_signature_throw_5" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(alice, 1000)
+    // deadline far in the future; bogus (v, r, s) so ecrecover returns
+    // either address(0) or some unrelated address — never `alice`.
+    call permit(alice, bob, 500, 9999999999, 27, 1, 2)
+    expect throw 5
+}
+
+test "nonces start at zero" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor(alice, 1000)
+    call nonces(alice)
+    expect return 0
+}

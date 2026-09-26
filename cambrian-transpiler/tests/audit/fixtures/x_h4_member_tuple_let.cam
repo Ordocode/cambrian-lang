@@ -1,0 +1,37 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-004 / X-H6: same `split` pure fn — route-level tuple let vs member-transform let.
+// Control: `peek` route (T-VAL-002 surface). Probe: `m_slot` member transform.
+
+pure fn split(who: address, seed: U256) -> (address, U256, bool) {
+    if seed > 0 {
+        (who, seed, true)
+    } else {
+        (who, 0, false)
+    }
+}
+
+entity MemberTupleLet {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        peek(who: address, seed: U256) -> (address, U256, bool) => [
+            let (owner, amt, flag) = split(who, seed);
+            return(owner, amt, flag)
+        ]
+
+        run(who: address, seed: U256) => []
+
+        getSlot() -> U256 => [ return(m_slot) ]
+    }
+
+    m_slot: U256 {
+        in constructor() => 0
+        in run(who, seed) => {
+            let (o, a, f) = split(who, seed);
+            a
+        }
+    }
+}

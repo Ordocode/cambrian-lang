@@ -1,0 +1,29 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis LEAN-H2: a fail-mode view route whose only `return(...)`
+// lives inside conditionals must lift payloads into `if … then … else …`,
+// not fall through to `(s, default)`.
+
+entity ClassifyFail {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        classify(n: u64) -> u64
+            where n < 1000 : throw 1
+        => [
+            if n > 100 => [
+                return(2)
+            ] else [
+                if n > 0 => [
+                    return(1)
+                ] else [
+                    return(0)
+                ]
+            ]
+        ]
+    }
+
+    m_x: u64 {}
+}

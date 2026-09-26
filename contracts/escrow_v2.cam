@@ -1,0 +1,122 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Escrow v2 — using enums + match instead of u8 state codes
+// Demonstrates: enum declarations, match expressions, enum variant refs,
+//               Option<T> with some/none, type aliases
+
+type Amount = U256
+type Timestamp = u64
+
+pure fn is_party(sender: address, buyer: address, seller: address) -> bool {
+    sender == buyer || sender == seller
+}
+
+entity EscrowV2 {
+
+    enum State {
+        Created,
+        Funded,
+        Released,
+        Refunded,
+        Disputed,
+        Resolved
+    }
+
+    const ERROR_WRONG_STATE: u8 = 10
+    const ERROR_NOT_BUYER: u8 = 11
+    const ERROR_NOT_SELLER: u8 = 12
+    const ERROR_NOT_ARBITER: u8 = 13
+    const ERROR_NOT_PARTY: u8 = 14
+    const ERROR_DEADLINE_NOT_PASSED: u8 = 16
+
+    routes {
+        constructor(buyer: address, seller: address, arbiter: address,
+                    amount: Amount, deadline: Timestamp) => []
+
+        fund()
+            where m_state == State::Created : throw 10 &&
+                  msg::sender == m_buyer : throw 11 => []
+
+        release()
+            where m_state == State::Funded : throw 10 &&
+                  msg::sender == m_buyer : throw 11 => [
+                ~> m_seller
+            ]
+
+        refund()
+            where m_state == State::Funded : throw 10 &&
+                  msg::sender == m_seller : throw 12 => [
+                ~> m_buyer
+            ]
+
+        claimTimeout()
+            where m_state == State::Funded : throw 10 &&
+                  msg::sender == m_buyer : throw 11 &&
+                  msg::timestamp > m_deadline : throw 16 => [
+                ~> m_buyer
+            ]
+
+        dispute()
+            where m_state == State::Funded : throw 10 &&
+                  is_party(msg::sender, m_buyer, m_seller) : throw 14 => []
+
+        resolve(to_buyer_pct: u8)
+            where m_state == State::Disputed : throw 10 &&
+                  msg::sender == m_arbiter : throw 13 => [
+                let buyer_amount = m_amount * to_buyer_pct as Amount / 100;
+                let seller_amount = m_amount - buyer_amount;
+                if buyer_amount + seller_amount == m_amount => [
+                    ~> m_buyer
+                    ~> m_seller
+                ]
+            ]
+
+        getStatus() -> (u8, Amount, Timestamp) => [
+            let state_code = match m_state {
+                State::Created => 0,
+                State::Funded => 1,
+                State::Released => 2,
+                State::Refunded => 3,
+                State::Disputed => 4,
+                State::Resolved => 5
+            };
+            return(state_code, m_amount, m_deadline)
+        ]
+    }
+
+    m_buyer: address {
+        in constructor(buyer, _, _, _, _) => buyer
+    }
+
+    m_seller: address {
+        in constructor(_, seller, _, _, _) => seller
+    }
+
+    m_arbiter: address {
+        in constructor(_, _, arbiter, _, _) => arbiter
+    }
+
+    m_amount: Amount {
+        in constructor(_, _, _, amount, _) => amount
+    }
+
+    m_deadline: Timestamp {
+        in constructor(_, _, _, _, deadline) => deadline
+    }
+
+    m_state: State {
+        in constructor(_, _, _, _, _) => State::Created
+        in fund() => State::Funded
+        in release() => State::Released
+        in refund() => State::Refunded
+        in claimTimeout() => State::Refunded
+        in dispute() => State::Disputed
+        in resolve(_) => State::Resolved
+    }
+
+    m_resolution: Option<String> {
+        in constructor(_, _, _, _, _) => none
+        in resolve(_) => some("Resolved by arbiter")
+    }
+}

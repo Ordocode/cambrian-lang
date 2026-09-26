@@ -1,0 +1,30 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-O-001 / PW3-S-002: Option<u64> — tagged EVM Option vs Lean Option.
+// `some(0)` must classify as some (222), not none (111).
+
+entity OptZero {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        setSome(v: u64) => []
+
+        clear() => []
+
+        classify() -> u64 => [
+            let r = match m_t {
+                none => 111,
+                some(x) => 222,
+            };
+            return(r)
+        ]
+    }
+
+    m_t: Option<u64> {
+        in constructor() => none
+        in setSome(v) => some(v)
+        in clear() => none
+    }
+}

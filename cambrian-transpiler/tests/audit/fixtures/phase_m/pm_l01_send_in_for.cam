@@ -1,0 +1,46 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-LEAN-IR-001 / PM-001 (MA-L01): typed send inside `for` after another send
+// in the same phase must lower to ARoutes.ping — not silently dropped via `-- L8:`.
+
+entity A {
+    identity aid: u64
+
+    m_x: u64 {
+        in ping(v) => m_x + v
+    }
+
+    routes {
+        ping(v: u64) => []
+    }
+}
+
+entity C {
+    identity cid: u64
+
+    m_y: u64 {
+        in pong(v) => m_y + v
+    }
+
+    routes {
+        pong(v: u64) => []
+    }
+}
+
+entity B {
+    identity bid: u64
+
+    m_n: u64 {
+        in fan(k) => m_n + k
+    }
+
+    routes {
+        fan(k: u64) => [
+            pong(k) ~> C.address(7)
+            for i in 0..2 => [
+                ping(i) ~> A.address(i)
+            ]
+        ]
+    }
+}

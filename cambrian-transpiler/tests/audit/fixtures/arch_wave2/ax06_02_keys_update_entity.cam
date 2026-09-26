@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-018 / H-AX-06-02: chained `m.insert(a,v).insert(b,v)` member transform —
+// `keys_update_term` tracks only the last key; Lean `m.keys()` / `m.len()` read ghost `m_keys`.
+
+entity KeysUpdateProbe {
+    routes {
+        #[factory_only]
+        init setup() => []
+
+        seedBoth() => []
+
+        countKeys() -> u64 => [
+            return(m.keys().fold(0, |acc, _| acc + 1))
+        ]
+    }
+
+    m: HashMap<u64, u64> {
+        in setup() => HashMap::new()
+        in seedBoth() => m.insert(1, 10).insert(2, 20)
+    }
+}

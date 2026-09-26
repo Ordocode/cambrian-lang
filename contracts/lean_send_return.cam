@@ -1,0 +1,44 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Lean fixture: a send-bearing route that also `return(...)`s a value.
+// Exercises the world-threaded `(w, <payload>)` tail — the return value
+// must survive the send instead of being dropped to `default`.
+
+entity Counter {
+    routes {
+        init create() => []
+
+        // View-style self-call target: returns the post-increment.
+        bumped(n: u64) -> u64 => [
+            return(m_count + n)
+        ]
+
+        // Send-bearing route that captures the self-call result via a
+        // `var` and returns it. The capture forces the world-threaded
+        // path; the trailing `return(bv)` must be lowered into the tuple
+        // result.
+        kickAndRead(n: u64) -> u64 => [
+            var bv = bumped(n) ~> Counter.address();
+            return(bv)
+        ]
+
+        // Send-bearing route whose `return(...)` lives inside a
+        // conditional. The world-threaded `(w, <payload>)` tail must lift
+        // the conditional into an `if … then … else …` term so the
+        // captured `bv` survives instead of collapsing to `(w, default)`.
+        kickThenChoose(n: u64) -> u64 => [
+            var bv = bumped(n) ~> Counter.address();
+            if n > 0 => [
+                return(bv)
+            ] else [
+                return(0)
+            ]
+        ]
+    }
+
+    m_count: u64 {
+        in create() => 0
+        in bumped(n) => m_count + n
+    }
+}

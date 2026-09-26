@@ -1,0 +1,14 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pw3-invariant-multi-entity-evm
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - multi_entity_trace.cam
+
+invariant:
+  fail_on_revert: false
+  runs: 4
+  depth: 4

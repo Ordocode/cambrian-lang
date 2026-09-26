@@ -1,0 +1,223 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// ERC20Multi — multi-instance fungible token.
+//
+// DERIVED FILE — do not edit. Generated from token/ERC20.cam by
+// src/stdlib-erc20-derive.ts; run `npm run stdlib:derive` after changing the
+// singleton, and see that module for why this is a derivation rather than a
+// second copy or a shared import.
+//
+// Identical to the singleton in every guard, member transform and throw code.
+// The difference is the `identity` member: this entity is deployed once per
+// `m_token_id`, at an address CREATE2 derives from that id, so a caller can
+// compute `ERC20Multi.address(0)` and `ERC20Multi.address(1)` before either
+// exists. That is what an AMM harness needs to wrap two distinct tokens
+// without a hand-written factory, and it is the only reason to prefer this
+// over the singleton — a token with one deployment should use ERC20.cam,
+// which costs one storage slot less and one fewer concept.
+//
+// The identity is seeded at deployment (`with { m_token_id: 1 }`), not through
+// the constructor: it participates in address derivation, so it has to be
+// known before the constructor runs.
+
+import "./erc20-core.cam"
+
+entity ERC20Multi {
+
+    identity m_token_id: u8
+
+
+    // Without these an indexer sees nothing: balances live in storage a
+    // subgraph cannot enumerate, so the transfer history of the token would
+    // exist only as the difference between two archive-node reads. Mint and
+    // burn use the zero address as the counterparty, which is the convention
+    // every explorer already decodes as issuance and destruction.
+    event Transfer(indexed from_addr: address, indexed to: address, value: U256);
+    event Approval(indexed owner: address, indexed spender: address, value: U256);
+
+    routes {
+        // `minter` may be the zero address, which permanently disables mint
+        // and fixes the supply at `initial_supply` — the usual choice for a
+        // token that should never inflate.
+        #[factory_only]
+        constructor(name_: String, symbol_: String, decimals_: u8,
+                    minter_: address,
+                    initial_holder: address, initial_supply: U256) => []
+
+        // The three routes below return `true`, which ERC-20 requires and
+        // which the earlier revision of this entity omitted. A selector does
+        // not carry its return type, so the omission compiled and every test
+        // written in Cambrian passed: the harness calls the route directly and
+        // never decodes a result. A Solidity consumer holding an `IERC20`
+        // does decode one, and an empty returndata makes the decode revert —
+        // so the token worked from its own suite and failed from any wallet,
+        // router or vault that reached it through the interface.
+        //
+        // These routes cannot return `false`: a rejected transfer throws. The
+        // bool is there for the ABI, not as a second error channel — a caller
+        // that branches on it is reading a value that is `true` or absent.
+        transfer(to: address, amount: U256) -> bool
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 2
+        => [
+            emit Transfer(msg::sender, to, amount);
+            return(true)
+        ]
+
+        // The caller spends `amount` of `from_addr`'s balance against the
+        // `from_addr → msg::sender` allowance.
+        transferFrom(from_addr: address, to: address, amount: U256) -> bool
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  balance_of(m_balances, from_addr) >= amount : throw 2 &&
+                  allowance_of(m_allowances, from_addr, msg::sender) >= amount : throw 3
+        => [
+            emit Transfer(from_addr, to, amount);
+            return(true)
+        ]
+
+        approve(spender: address, amount: U256) -> bool
+            where spender != zero_address() : throw 7
+        => [
+            emit Approval(msg::sender, spender, amount);
+            return(true)
+        ]
+
+        // EIP-2612. A stale signature recovers a digest the signer never
+        // endorsed — the nonce read here is the pre-update value, because
+        // `where` runs before member transforms — so replays fail the signer
+        // check rather than needing a separate guard.
+        permit(owner: address, spender: address, value: U256,
+               deadline: U256, v: u8, r: bytes32, s: bytes32)
+            where deadline >= sys::timestamp : throw 4 &&
+                  owner != zero_address() : throw 7 &&
+                  spender != zero_address() : throw 7 &&
+                  permit_signer(
+                      domain_separator(m_hashed_name, m_hashed_version,
+                                       sys::chainid, sys::address),
+                      permit_struct_hash(owner, spender, value,
+                                         nonce_of(m_nonces, owner), deadline),
+                      v, r, s) == owner : throw 5
+        => [ emit Approval(owner, spender, value); ]
+
+        mint(to: address, amount: U256)
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  msg::sender == m_minter : throw 6
+        => [ emit Transfer(zero_address(), to, amount); ]
+
+        burn(amount: U256)
+            where amount > 0 : throw 1 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 2
+        => [ emit Transfer(msg::sender, zero_address(), amount); ]
+
+        view name() -> String => [ return(m_name) ]
+        view symbol() -> String => [ return(m_symbol) ]
+        view decimals() -> u8 => [ return(m_decimals) ]
+        view minter() -> address => [ return(m_minter) ]
+        view tokenId() -> u8 => [ return(m_token_id) ]
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        view allowance(owner: address, spender: address) -> U256 => [
+            return(allowance_of(m_allowances, owner, spender))
+        ]
+
+        view totalSupply() -> U256 => [ return(m_total_supply) ]
+
+        view nonces(owner: address) -> U256 => [
+            return(nonce_of(m_nonces, owner))
+        ]
+
+        view DOMAIN_SEPARATOR() -> bytes32 => [
+            return(domain_separator(m_hashed_name, m_hashed_version,
+                                    sys::chainid, sys::address))
+        ]
+    }
+
+    m_name: String { in constructor(name_, _, _, _, _, _) => name_ }
+    m_symbol: String { in constructor(_, symbol_, _, _, _, _) => symbol_ }
+    m_decimals: u8 { in constructor(_, _, decimals_, _, _, _) => decimals_ }
+    m_minter: address { in constructor(_, _, _, minter_, _, _) => minter_ }
+
+    // The EIP-712 domain is derived from the deployed name, not from a
+    // hardcoded digest. A hardcoded hash silently describes a different token
+    // than the one deployed the moment the name argument changes, and every
+    // permit signature then verifies against a domain no wallet will show.
+    m_hashed_name: U256 {
+        in constructor(name_, _, _, _, _, _) => evm::keccak256Packed(name_)
+    }
+    m_hashed_version: U256 {
+        in constructor(_, _, _, _, _, _) => evm::keccak256Packed(b"1")
+    }
+
+    m_total_supply: U256 {
+        in constructor(_, _, _, _, _, initial_supply) => initial_supply
+        in mint(_, amount) => m_total_supply + amount
+        in burn(amount)    => m_total_supply - amount
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(_, _, _, _, initial_holder, initial_supply) => {
+            {}.insert(initial_holder, initial_supply)
+        }
+        // Both balances are read before either is written, so when payer and
+        // payee are the same address the credit overwrites the debit and the
+        // account gains `amount` out of nothing. The self-transfer guard is
+        // what keeps the sum of balances equal to the total supply; without it
+        // `totalSupply` still balances, so the stateful invariant stays green
+        // while the token mints. A self-transfer moves nothing, so returning
+        // the map untouched is also the right semantics.
+        in transfer(to, amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            let bal_to   = balance_of(m_balances, to);
+            if to == msg::sender { m_balances } else {
+                m_balances
+                    .update(msg::sender, bal_from - amount)
+                    .update(to,          bal_to   + amount)
+            }
+        }
+        in transferFrom(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            if to == from_addr { m_balances } else {
+                m_balances
+                    .update(from_addr, bal_from - amount)
+                    .update(to,        bal_to   + amount)
+            }
+        }
+        in mint(to, amount) => {
+            let bal_to = balance_of(m_balances, to);
+            m_balances.update(to, bal_to + amount)
+        }
+        in burn(amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            m_balances.update(msg::sender, bal_from - amount)
+        }
+    }
+
+    m_allowances: HashMap<U256, U256> {
+        in approve(spender, amount) => {
+            m_allowances.update(hashOf(msg::sender, spender), amount)
+        }
+        in transferFrom(from_addr, _, amount) => {
+            let key  = hashOf(from_addr, msg::sender);
+            let prev = allowance_of(m_allowances, from_addr, msg::sender);
+            m_allowances.update(key, allowance_after_spend(prev, amount))
+        }
+        in permit(owner, spender, value, _, _, _, _) => {
+            m_allowances.update(hashOf(owner, spender), value)
+        }
+    }
+
+    m_nonces: HashMap<address, U256> {
+        in permit(owner, _, _, _, _, _, _) => {
+            let prev = nonce_of(m_nonces, owner);
+            m_nonces.update(owner, prev + 1)
+        }
+    }
+}

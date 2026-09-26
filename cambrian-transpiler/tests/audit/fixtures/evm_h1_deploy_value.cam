@@ -1,0 +1,35 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H1: deploy Entity(...) with { value: V } should
+// forward V to the CREATE2 instance, not strand it in CambrianFactory.
+
+entity Vault {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+    }
+
+    m_placeholder: u64 {
+        in constructor() => 0
+    }
+}
+
+entity Deployer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        spawnFundedVault(vault_id: u64) => [
+            deploy Vault(vault_id) with { value: 1000000000000000000 }
+        ]
+    }
+
+    m_spawns: u64 {
+        in constructor() => 0
+        in spawnFundedVault(_) => m_spawns + 1
+    }
+}

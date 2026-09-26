@@ -1,0 +1,56 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Demonstrates standard library functions:
+// std::math::{min,max,clamp,muldiv,divc,divr}, sys::balance,
+// .len(), .contains(), .is_empty()
+
+entity StdlibDemo {
+
+    routes {
+        constructor() => []
+        addItem(key: u64, value: u64) => []
+        removeItem(key: u64) => []
+        getMin(a: u64, b: u64) -> u64 => [
+            return(std::math::min(a, b))
+        ]
+        getMax(a: u64, b: u64) -> u64 => [
+            return(std::math::max(a, b))
+        ]
+        getClamped(x: u64, lo: u64, hi: u64) -> u64 => [
+            return(std::math::clamp(x, lo, hi))
+        ]
+        getSize() -> u64 => [
+            return(m_count)
+        ]
+        hasKey(key: u64) -> bool => [
+            return(m_data.contains(key))
+        ]
+        isEmpty() -> bool => [
+            return(m_data.is_empty())
+        ]
+        getBalance() -> u128 => [
+            return(sys::balance)
+        ]
+        calcFee(amount: u64, rate: u64, base: u64) -> u64 => [
+            return(std::math::muldiv(amount, rate, base))
+        ]
+        ceilDiv(a: u64, b: u64) -> u64 => [
+            return(std::math::divc(a, b))
+        ]
+        roundDiv(a: u64, b: u64) -> u64 => [
+            return(std::math::divr(a, b))
+        ]
+    }
+
+    m_data: HashMap<u64, u64> {
+        in constructor() => HashMap::new()
+        in addItem(key, value) => m_data.insert(key, value)
+        in removeItem(key) => m_data.remove(key)
+    }
+
+    m_count: u64 {
+        in constructor() => 0
+        in addItem(_, _) => m_count + 1
+    }
+}

@@ -1,0 +1,19 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// LCC cross-target repro: COBOL UNSTRING-style CSV helpers (from examples/lcc-wasm-repro).
+pure fn cobol_unstring_csv(src: String, delim: String) -> Vec<String> {
+    src.split(delim).collect()
+}
+
+pure fn cobol_unstring_csv_field(csv: Vec<String>, index: u64) -> String {
+    csv[index]
+}
+
+entity SplitDemo {
+    routes {
+        run(lk_input: String) -> String => [
+            return(cobol_unstring_csv_field(cobol_unstring_csv(lk_input, ","), 0))
+        ]
+    }
+}

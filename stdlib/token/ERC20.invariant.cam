@@ -1,0 +1,69 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Invariant: no route other than mint can move the total supply, and mint is
+// unreachable for the addresses the fuzzer drives.
+//
+// The instance is deployed with the constructor defaults, so the minter is the
+// zero address and the initial supply is 0. The action set deliberately
+// includes `mint`: with a zero minter every call to it reverts, so a supply
+// that stays at 0 is evidence the gate holds under random traces, not merely
+// that mint was never attempted.
+
+invariant "totalSupply is conserved across non-mint routes" for ERC20 {
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action transfer(to: address, amount: U256) { }
+    action transferFrom(from_addr: address, to: address, amount: U256) { }
+    action approve(spender: address, amount: U256) { }
+    action mint(to: address, amount: U256) { }
+
+    check totalSupply() == 0
+}
+
+// Invariant: the balances sum to the emission.
+//
+// The invariant above watches `m_total_supply`, a stored scalar that only
+// `mint` and `burn` ever write. It therefore cannot see a balance created out
+// of nothing — which is exactly what an aliased transfer did, leaving the
+// conservation claim green while the token minted. This one recomputes the
+// emission from the balances, so a route that credits without emitting fails.
+//
+// Holding a derived total against the stored one needs the holder set closed,
+// so every route that can create a balance has its recipient `bound` into the
+// two rotation addresses. `bound` rather than `assume`: an `assume` on a
+// fuzzed address rejects the call at odds of 2^-160, so the actions would
+// never run and the check would pass over an empty trace. Bounding maps each
+// draw into the set instead of discarding it, and `to` stays a fuzzed
+// parameter — the fuzzer reaches `to == msg.sender` on its own, so the
+// aliasing case is inside the domain rather than excluded from it.
+//
+// `m_minter` is injected so `mint` is reachable at all: with the zero minter
+// of the invariant above every call reverts and the balances stay at zero,
+// which satisfies any check without ever testing it.
+invariant "the balances sum to the emission" for ERC20 {
+    init { m_minter: 0x0000000000000000000000000000000000000000000000000000000000000a01 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action transfer(to: address, amount: U256) {
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action transferFrom(from_addr: address, to: address, amount: U256) {
+        bound from_addr in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action approve(spender: address, amount: U256) { }
+    action mint(to: address, amount: U256) {
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action burn(amount: U256) { }
+
+    check balanceOf(0x0000000000000000000000000000000000000000000000000000000000000a01) + balanceOf(0x0000000000000000000000000000000000000000000000000000000000000a02) == totalSupply()
+}

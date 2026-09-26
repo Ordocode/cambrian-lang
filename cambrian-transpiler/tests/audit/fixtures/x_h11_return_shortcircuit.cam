@@ -1,0 +1,24 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-009 / LEAN-H1 / X-H11: `throw` must short-circuit; dead `emit` after
+// terminator must not run on EVM (Lean codegen keeps `Logged 2` — T-LEAN-001).
+
+entity ShortCircuit {
+    event Logged(v: u64);
+
+    routes {
+        #[factory_only]
+        init create() => []
+
+        go(n: u64)
+            where n < 1000 : throw 1
+        => [
+            emit Logged(1);
+            throw 5
+            emit Logged(2);
+        ]
+    }
+
+    m_x: u64 {}
+}

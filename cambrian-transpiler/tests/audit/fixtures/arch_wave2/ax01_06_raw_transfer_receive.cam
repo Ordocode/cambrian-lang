@@ -1,0 +1,34 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-026 / H-AX-01-06: raw `~> Entity.address() with { value }` — EVM runs
+// `receive()` member transforms; Lean `WorldState.transfer` only.
+
+entity ValueVault {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        accept receive() => []
+
+        getDeposits() -> u128 => [
+            return(m_deposits)
+        ]
+    }
+
+    m_deposits: u128 {
+        in constructor() => 0
+        in receive() => m_deposits + msg::value as u128
+    }
+}
+
+entity RawPayer {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        pay(amount: u128) => [
+            ~> ValueVault.address() with { value: amount }
+        ]
+    }
+}

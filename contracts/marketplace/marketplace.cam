@@ -1,0 +1,133 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Marketplace: Shop + Order + Treasury — 3-entity E2E test system
+// Demonstrates: inter-contract messaging, from clauses, AddressOf, HashMap,
+//               MessageName(args) ~> Entity.address(constructor_args), ~> target_address
+
+type Amount = U256
+
+record OrderInfo {
+    seller: address,
+    amount: Amount
+}
+
+entity Shop {
+
+    const ERROR_SHOP_ZERO_AMOUNT: u8 = 1
+
+    routes {
+        constructor(shop_id: u64) => []
+
+        createOrder(order_id: u64, seller: address, amount: Amount)
+            where amount > 0 : throw ERROR_SHOP_ZERO_AMOUNT => [
+                OrderCreated(order_id, seller, amount) ~> Order.address(order_id, m_shop_id, seller, amount)
+            ]
+
+        releaseOrder(order_id: u64, seller: address, amount: Amount) => [
+            ReleaseOrder() ~> Order.address(order_id, m_shop_id, seller, amount)
+        ]
+
+        view getShopId() -> u64 => [
+            return(m_shop_id)
+        ]
+    }
+
+    m_shop_id: u64 {
+        in constructor(shop_id) => shop_id
+    }
+}
+
+entity Order {
+
+    const ERROR_AMOUNT_MISMATCH: u8 = 10
+    const ERROR_NOT_CONFIRMED: u8 = 11
+
+    routes {
+        constructor(order_id: u64, shop_id: u64, seller: address, amount: Amount) => []
+
+        confirmPayment(amount: Amount)
+            from Treasury(m_shop_id)
+            where amount == m_amount : throw ERROR_AMOUNT_MISMATCH => []
+
+        releaseOrder()
+            from Shop(m_shop_id)
+            where m_confirmed : throw ERROR_NOT_CONFIRMED => [
+                Payment(m_amount) ~> m_seller
+            ]
+
+        view getStatus() -> (bool, Amount) => [
+            return(m_confirmed, m_amount)
+        ]
+    }
+
+    m_order_id: u64 {
+        in constructor(order_id, _, _, _) => order_id
+    }
+
+    m_shop_id: u64 {
+        in constructor(_, shop_id, _, _) => shop_id
+    }
+
+    m_seller: address {
+        in constructor(_, _, seller, _) => seller
+    }
+
+    m_amount: Amount {
+        in constructor(_, _, _, amount) => amount
+    }
+
+    m_confirmed: bool {
+        in constructor(_, _, _, _) => false
+        in confirmPayment(_) => true
+    }
+}
+
+entity Treasury {
+
+    const ERROR_ORDER_NOT_FOUND: u8 = 20
+    const ERROR_ORDER_EXISTS: u8 = 21
+    const ERROR_TREASURY_ZERO_AMOUNT: u8 = 22
+
+    routes {
+        constructor(shop_id: u64) => []
+
+        deposit(order_id: u64, seller: address, amount: Amount)
+            where amount > 0 : throw ERROR_TREASURY_ZERO_AMOUNT &&
+                  !m_orders.exists(order_id) : throw ERROR_ORDER_EXISTS => [
+                DepositConfirmation(order_id, amount) ~> msg::sender
+            ]
+
+        confirmOrder(order_id: u64)
+            where m_orders.exists(order_id) : throw ERROR_ORDER_NOT_FOUND => [
+                let info = m_orders[order_id];
+                ConfirmPayment(info.amount) ~> Order.address(order_id, m_shop_id, info.seller, info.amount)
+            ]
+
+        view getOrderCount() -> u64 => [
+            return(m_order_count)
+        ]
+
+        view hasOrder(order_id: u64) -> bool => [
+            return(m_orders.exists(order_id))
+        ]
+    }
+
+    m_shop_id: u64 {
+        in constructor(shop_id) => shop_id
+    }
+
+    m_order_count: u64 {
+        in constructor(_) => 0
+        in deposit(_, _, _) => m_order_count + 1
+        in confirmOrder(_) => m_order_count - 1
+    }
+
+    m_orders: HashMap<u64, OrderInfo> {
+        in deposit(order_id, seller, amount) => {
+            let info = OrderInfo { seller: seller, amount: amount };
+            m_orders.insert(order_id, info)
+        }
+        in confirmOrder(order_id) => m_orders.remove(order_id)
+    }
+}

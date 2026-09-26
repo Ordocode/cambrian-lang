@@ -1,0 +1,223 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// CTE integration tests — qa-plan I-002, I-003, I-004; handoff §8.
+// Multi-hop flows and allowance lifecycle beyond CPE unit scope.
+
+// SPEC: PROP-RHT-003 TransferConservation
+test "integration distribute from deployer to three holders" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let alice    = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+    let chunk    = 10000000000000000000000
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(alice, chunk)
+    msg { sender: deployer }
+    call transfer(bob, chunk)
+    msg { sender: deployer }
+    call transfer(carol, chunk)
+
+    call balanceOf(deployer)
+    expect return 1000000000000000000000000 - (chunk * 3)
+    call balanceOf(alice)
+    expect return chunk
+    call balanceOf(bob)
+    expect return chunk
+    call balanceOf(carol)
+    expect return chunk
+    call totalSupply()
+    expect return 1000000000000000000000000
+}
+
+// SPEC: PROP-RHT-003 TransferConservation
+test "integration multi holder transfer chain" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let alice    = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+    let hop      = 1000000000000000000
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(alice, hop * 3)
+    msg { sender: alice }
+    call transfer(bob, hop)
+    msg { sender: bob }
+    call transfer(carol, hop)
+
+    call balanceOf(carol)
+    expect return hop
+    call balanceOf(bob)
+    expect return 0
+    call balanceOf(alice)
+    expect return hop * 2
+    call totalSupply()
+    expect return 1000000000000000000000000
+}
+
+// SPEC: PROP-RHT-010 TransferFromConservationAndAllowanceDecr
+test "integration approve and spend with second spend reverts" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+    let amount   = 5000000000000000000000
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(spender, amount)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, amount)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, 1)
+    expect throw 203
+}
+
+// SPEC: PROP-RHT-010a TransferFromPartialAllowanceDecr
+test "integration repeated partial transferFrom exhausts allowance" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+    let total    = 1000000000000000000
+    let slice    = 100000000000000000
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(spender, total)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, slice)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, slice)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, slice)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, slice)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, slice)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, slice)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, slice)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, slice)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, slice)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, slice)
+    msg { sender: deployer }
+    call allowance(deployer, spender)
+    expect return 0
+    call balanceOf(carol)
+    expect return total
+}
+
+// SPEC: PROP-RHT-008 ApproveSetsAllowance
+test "integration allowance reset to zero then spend" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+    let amount   = 1000000000000000000
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(spender, amount)
+    msg { sender: deployer }
+    call approve(spender, 0)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, 1)
+    expect throw 203
+    msg { sender: deployer }
+    call approve(spender, amount)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, amount)
+    call balanceOf(carol)
+    expect return amount
+}
+
+// SPEC: PROP-RHT-006 TransferZeroAmountPermitted
+test "integration zero value transfer in multi holder context" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let alice    = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let seed     = 1000000000000000000
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(alice, seed)
+    msg { sender: alice }
+    call transfer(bob, 0)
+    call balanceOf(alice)
+    expect return seed
+    call balanceOf(bob)
+    expect return 0
+    call totalSupply()
+    expect return 1000000000000000000000000
+}
+
+// SPEC: PROP-RHT-003 TransferConservation — near-max magnitude (CTI-001 remediation)
+test "integration near max single transfer" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let amount   = 1000000000000000000000000 - 1
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(bob, amount)
+
+    call balanceOf(deployer)
+    expect return 1
+    call balanceOf(bob)
+    expect return amount
+    call totalSupply()
+    expect return 1000000000000000000000000
+}
+
+// SPEC: PROP-RHT-003 TransferConservation — majority supply redistribution
+test "integration majority supply transfer" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let alice    = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let majority = 600000000000000000000000
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(alice, majority)
+
+    call balanceOf(deployer)
+    expect return 1000000000000000000000000 - majority
+    call balanceOf(alice)
+    expect return majority
+    call totalSupply()
+    expect return 1000000000000000000000000
+}
+
+// SPEC: PROP-RHT-010 TransferFromConservationAndAllowanceDecr
+test "integration chain transfer then partial pull" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let alice    = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+    let hop      = 1000000000000000000
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(alice, hop * 2)
+    msg { sender: alice }
+    call transfer(bob, hop)
+    msg { sender: bob }
+    call approve(spender, hop)
+    msg { sender: spender }
+    call transferFrom(bob, carol, hop / 2)
+
+    call balanceOf(carol)
+    expect return hop / 2
+    call balanceOf(bob)
+    expect return hop / 2
+    msg { sender: bob }
+    call allowance(bob, spender)
+    expect return hop / 2
+    call totalSupply()
+    expect return 1000000000000000000000000
+}

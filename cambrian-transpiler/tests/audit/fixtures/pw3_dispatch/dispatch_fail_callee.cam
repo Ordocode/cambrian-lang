@@ -1,0 +1,36 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-004 row 3: dynamic dispatch to fallible callee — Dispatch.* total vs EVM revert.
+
+entity Payee {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+
+        accept failAlways() where (false) : throw 1 => []
+    }
+
+    m_x: u64 {
+        in create() => 0
+    }
+}
+
+entity Payer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create(dest: Address<Payee>) => []
+
+        callFail() => [
+            failAlways() ~> m_dest
+        ]
+    }
+
+    m_dest: Address<Payee> {
+        in create(dest) => dest
+    }
+}

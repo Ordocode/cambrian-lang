@@ -1,0 +1,8 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: arch-ax04-01-lean
+target: lean
+output_dir: build/
+sources:
+  - ax04_01_ctor_before_msg.cam

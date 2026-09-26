@@ -1,0 +1,37 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-012 / H-AX-04-01: W11 anti-pattern — `call gate()` before
+// `msg { sender }`. EVM (non-det) lowers param-less init to constructor;
+// Lean spec `match Routes.gate` uses `.error _ => False` on failed init.
+
+entity SenderGate {
+    const ZERO: address = 0x0000000000000000000000000000000000000000
+
+    routes {
+        #[factory_only]
+        init gate() where msg::sender != ZERO : throw 1 => []
+
+        readOk() -> bool => [
+            return(m_ok)
+        ]
+    }
+
+    m_ok: bool {
+        in gate() => true
+    }
+}
+
+test "msg before gate succeeds" for SenderGate {
+    msg { sender: 0x0000000000000000000000000000000000000001 }
+    call gate()
+    call readOk()
+    expect return true
+}
+
+test "gate before msg reverts" for SenderGate {
+    call gate()
+    msg { sender: 0x0000000000000000000000000000000000000001 }
+    call readOk()
+    expect return true
+}

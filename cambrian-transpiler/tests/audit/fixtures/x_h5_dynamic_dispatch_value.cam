@@ -1,0 +1,38 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-005 / LEAN-H7 differential: dynamic dispatch `deposit() ~> m_dest with { value }`.
+// Extends lean_h7 with `m_balance` + `getBalance` for Forge value assertions.
+
+entity Payee {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+        accept deposit() => []
+        getBalance() -> u128 => [ return(m_balance) ]
+    }
+
+    m_balance: u128 {
+        in create() => 0
+        in deposit() => m_balance + msg::value as u128
+    }
+}
+
+entity Payer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create(dest: Address<Payee>) => []
+
+        pay(amount: u128) => [
+            deposit() ~> m_dest with { value: amount }
+        ]
+    }
+
+    m_dest: Address<Payee> {
+        in create(dest) => dest
+    }
+}

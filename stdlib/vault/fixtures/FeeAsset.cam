@@ -1,0 +1,124 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// FeeAsset — a test fixture, not a library component.
+//
+// An ERC-20 that delivers less than it was asked to move: the sender is
+// debited the full amount, the recipient is credited the amount minus a fee
+// in basis points, and the difference is burned. This is the shape of USDT
+// with its fee switch on, of a handful of deflationary tokens, and of
+// anything that takes a cut on transfer.
+//
+// It exists because the two headline claims of `ERC4626.cam` — P0-6 and P0-7
+// of `stdlib/bls/erc4626.md`, that the vault issues shares against what
+// arrived rather than against what was asked for — are invisible against a
+// well-behaved token. With a token that delivers in full, counting and
+// trusting give the same answer, and a suite that only ever uses one cannot
+// tell a correct vault from one that credits the request.
+//
+// Deliberately minimal: no permit, no infinite-allowance sentinel, no events,
+// no zero-address guards beyond what the vault's own tests need. It is not in
+// `stdlib-catalog` and nothing outside this directory should import it.
+
+// Plain indexing, not `.contains`: the presence sidecar exists for entity
+// members, and a map arriving as a parameter has none. A missing key reads
+// zero, which is the ERC-20 semantics anyway.
+pure fn fee_bal(balances: HashMap<address, U256>, owner: address) -> U256 {
+    balances[owner]
+}
+
+pure fn fee_allow(allowances: HashMap<U256, U256>,
+                  owner: address, spender: address) -> U256 {
+    allowances[hashOf(owner, spender)]
+}
+
+// The cut, rounded down — the same direction a real fee-on-transfer token
+// uses, and the direction that makes the delivered amount an exact
+// `amount - cut` rather than an approximation.
+pure fn fee_cut(amount: U256, bps: U256) -> U256 { amount * bps / 10000 }
+
+pure fn fee_delivered(amount: U256, bps: U256) -> U256 { amount - fee_cut(amount, bps) }
+
+entity FeeAsset {
+    // The fee rate is part of the identity so two fixtures with different
+    // rates land at different addresses and one test can hold both.
+    identity m_fee_bps: U256
+
+    routes {
+        #[factory_only]
+        constructor(holder: address, supply: U256) => []
+
+        transfer(to: address, amount: U256) -> bool
+            where fee_bal(m_balances, msg::sender) >= amount : throw 2
+        => [ return(true) ]
+
+        transferFrom(from_addr: address, to: address, amount: U256) -> bool
+            where fee_bal(m_balances, from_addr) >= amount : throw 2 &&
+                  fee_allow(m_allowances, from_addr, msg::sender) >= amount : throw 3
+        => [ return(true) ]
+
+        approve(spender: address, amount: U256) -> bool => [ return(true) ]
+
+        view balanceOf(owner: address) -> U256 => [ return(fee_bal(m_balances, owner)) ]
+        view allowance(owner: address, spender: address) -> U256 => [
+            return(fee_allow(m_allowances, owner, spender))
+        ]
+        view totalSupply() -> U256 => [ return(m_total_supply) ]
+        view feeBps() -> U256 => [ return(m_fee_bps) ]
+
+        // What a caller would have to send for `want` to arrive. Only used by
+        // the tests, to state expectations without repeating the arithmetic.
+        view grossFor(want: U256) -> U256 => [
+            return(want * 10000 / (10000 - m_fee_bps) + 1)
+        ]
+    }
+
+    m_total_supply: U256 {
+        in constructor(_, supply) => supply
+        in transfer(_, amount) => { m_total_supply - fee_cut(amount, m_fee_bps) }
+        in transferFrom(_, _, amount) => { m_total_supply - fee_cut(amount, m_fee_bps) }
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(holder, supply) => { m_balances.update(holder, supply) }
+
+        // The self-transfer branch is not decoration. Computed naively the
+        // two updates alias and the sender ends up with their pre-state
+        // balance minus the fee credited back in full — value out of nothing.
+        // Here a self-transfer still burns the fee, which is what a real one
+        // does.
+        in transfer(to, amount) => {
+            let bal_from = fee_bal(m_balances, msg::sender);
+            let bal_to   = fee_bal(m_balances, to);
+            if to == msg::sender {
+                m_balances.update(msg::sender, bal_from - fee_cut(amount, m_fee_bps))
+            } else {
+                m_balances
+                    .update(msg::sender, bal_from - amount)
+                    .update(to,          bal_to + fee_delivered(amount, m_fee_bps))
+            }
+        }
+        in transferFrom(from_addr, to, amount) => {
+            let bal_from = fee_bal(m_balances, from_addr);
+            let bal_to   = fee_bal(m_balances, to);
+            if to == from_addr {
+                m_balances.update(from_addr, bal_from - fee_cut(amount, m_fee_bps))
+            } else {
+                m_balances
+                    .update(from_addr, bal_from - amount)
+                    .update(to,        bal_to + fee_delivered(amount, m_fee_bps))
+            }
+        }
+    }
+
+    m_allowances: HashMap<U256, U256> {
+        in approve(spender, amount) => {
+            m_allowances.update(hashOf(msg::sender, spender), amount)
+        }
+        in transferFrom(from_addr, _, amount) => {
+            let key  = hashOf(from_addr, msg::sender);
+            let prev = fee_allow(m_allowances, from_addr, msg::sender);
+            m_allowances.update(key, prev - amount)
+        }
+    }
+}

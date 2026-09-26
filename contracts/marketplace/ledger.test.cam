@@ -1,0 +1,49 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Ledger — recordSale protected by from Broker clause
+
+test "constructor initializes counters" for Ledger skip from with { m_shop_id: 1 } {
+    registry Broker { code_hash: 0xa59aff770cb3c06f4fc16263627f7558d8761a350567af7ebadcbc0d391c4eda, code_depth: 44, wasm_hash: 0xdb7d32a16611041a64b699074416ac6329e03d698db944146665f3165342d05c }
+    call constructor()
+    expect state { m_total_sales: 0, m_total_volume: 0 }
+}
+
+test "recordSale increments sales and accumulates volume" for Ledger skip from with { m_shop_id: 7 } {
+    registry Broker { code_hash: 0xa59aff770cb3c06f4fc16263627f7558d8761a350567af7ebadcbc0d391c4eda, code_depth: 44, wasm_hash: 0xdb7d32a16611041a64b699074416ac6329e03d698db944146665f3165342d05c }
+    call constructor()
+
+    call recordSale(1, 100)
+    expect state { m_total_sales: 1, m_total_volume: 100 }
+
+    call recordSale(2, 250)
+    expect state { m_total_sales: 2, m_total_volume: 350 }
+
+    call recordSale(3, 50)
+    expect state { m_total_sales: 3, m_total_volume: 400 }
+}
+
+test "getTotalSales returns correct count" for Ledger skip from with { m_shop_id: 1 } {
+    registry Broker { code_hash: 0xa59aff770cb3c06f4fc16263627f7558d8761a350567af7ebadcbc0d391c4eda, code_depth: 44, wasm_hash: 0xdb7d32a16611041a64b699074416ac6329e03d698db944146665f3165342d05c }
+    call constructor()
+
+    call getTotalSales()
+    expect return 0
+
+    call recordSale(1, 500)
+    call getTotalSales()
+    expect return 1
+}
+
+test "getTotalVolume returns accumulated amount" for Ledger skip from with { m_shop_id: 1 } {
+    registry Broker { code_hash: 0xa59aff770cb3c06f4fc16263627f7558d8761a350567af7ebadcbc0d391c4eda, code_depth: 44, wasm_hash: 0xdb7d32a16611041a64b699074416ac6329e03d698db944146665f3165342d05c }
+    call constructor()
+
+    call getTotalVolume()
+    expect return 0
+
+    call recordSale(1, 1000)
+    call recordSale(2, 2000)
+    call getTotalVolume()
+    expect return 3000
+}

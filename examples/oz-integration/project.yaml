@@ -1,0 +1,19 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: oz-integration
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - PaymentForwarder.cam
+
+# Phase Library-4: foundry.remappings makes `@openzeppelin/contracts/...`
+# imports resolve against a checked-out OpenZeppelin clone. Pair with
+# `forge install OpenZeppelin/openzeppelin-contracts` inside `build/`.
+foundry:
+  optimizer: true
+  via_ir: true
+  remappings:
+    - "@openzeppelin/=lib/openzeppelin-contracts/"
+    - "forge-std/=lib/forge-std/src/"

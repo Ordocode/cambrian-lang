@@ -1,0 +1,87 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Escrow — phased routes, phaseState effects, rawReserve, commit, sends
+
+test "create sets owner and arbiter" for Escrow {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call create(owner, arbiter)
+    expect state { m_owner: owner, m_arbiter: arbiter }
+}
+
+test "fund with zero amount throws" for Escrow {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call create(owner, arbiter)
+
+    call fund(0, 1)
+    expect throw 101
+}
+
+test "fund sets balance and locks" for Escrow {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call create(owner, arbiter)
+
+    call fund(500, 42)
+    expect state { m_balance: 500, m_locked: true, m_token_id: 42 }
+}
+
+test "fund produces phaseState and rawReserve and commit" for Escrow {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call create(owner, arbiter)
+
+    call fund(1000, 1)
+    expect effects [.., phaseState(), .., rawReserve(100, 0), .., phaseState(), .., commit()]
+}
+
+test "fund accumulates balance" for Escrow {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call create(owner, arbiter)
+
+    call fund(300, 1)
+    expect state { m_balance: 300 }
+
+    call fund(200, 1)
+    expect state { m_balance: 500 }
+}
+
+test "release when not locked throws" for Escrow with { m_locked: false } {
+    let recipient = 0x0000000000000000000000000000000000000000000000000000000000000099
+    call release(recipient)
+    expect throw 200
+}
+
+test "release sends to recipient and unlocks" for Escrow with { m_locked: true, m_balance: 1000 } {
+    let recipient = 0x0000000000000000000000000000000000000000000000000000000000000099
+    call release(recipient)
+    expect state { m_locked: false, m_balance: 0 }
+    expect effects [.., ~> recipient, .., commit(), ..]
+}
+
+test "cancel when not locked throws" for Escrow with { m_locked: false } {
+    call cancel()
+    expect throw 300
+}
+
+test "cancel when locked emits commit" for Escrow with { m_locked: true } {
+    call cancel()
+    expect state { m_locked: false }
+    expect effects [commit()]
+}
+
+test "status returns locked state" for Escrow with { m_locked: true } {
+    call status()
+    expect return true
+}
+
+test "status returns unlocked state" for Escrow with { m_locked: false } {
+    call status()
+    expect return false
+}

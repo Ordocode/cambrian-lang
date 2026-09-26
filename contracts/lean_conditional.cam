@@ -1,0 +1,104 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Lean fixture: effects nested inside `if`-actions in world-threaded
+// routes must survive. Before the effect-fidelity follow-up they were
+// dropped to `-- skipped: action`; now each branch threads `w`.
+
+entity Switch {
+    event Toggled(amount: u64);
+    error TooLow(amount: u64);
+
+    routes {
+        init create() => []
+
+        // Send-bearing route: the `emit` + transfer live inside an `if`.
+        // Transfer always fail-propagates, so the route is fail-mode and
+        // both branches thread `w` via `let w ← (if …)`.
+        ping(dest: address, n: u64) => [
+            if n > 0 => [
+                emit Toggled(n);
+                ~> dest with { value: n }
+            ] else [
+                emit Toggled(0);
+            ]
+        ]
+
+        // Fail-mode route (route-level `where`): a `throw` inside a branch
+        // must propagate through the Except do-block instead of vanishing.
+        guard(n: u64)
+            where n < 1000 : throw 1 => [
+            if n > 0 => [
+                emit Toggled(n);
+            ] else [
+                throw 2
+            ]
+        ]
+
+        // No route-level fail surface — the only `throw` is nested inside
+        // the `if`. `route_fail_mode` recurses into branch bodies, so this
+        // route is still wrapped in `RouteResult` and the throw propagates.
+        bare(n: u64) => [
+            if n > 0 => [
+                throw 7
+            ]
+        ]
+
+        // Send-bearing route whose `else` raises a *custom* error. The
+        // custom error must lower to a stable, non-zero `ThrowCode`
+        // derived from its name — never the `ofNat 0` placeholder.
+        payOrFail(dest: address, n: u64)
+            where n < 1000 : throw 5 => [
+            if n > 0 => [
+                ~> dest with { value: n }
+            ] else [
+                throw TooLow(n)
+            ]
+        ]
+
+        // View route whose only `return(...)` lives inside a conditional.
+        // The payload must be lifted into a value-producing
+        // `if … then … else …` term, not collapsed to `(s, default)`.
+        classify(n: u64) -> u64 => [
+            if n > 100 => [
+                return(2)
+            ] else [
+                if n > 0 => [
+                    return(1)
+                ] else [
+                    return(0)
+                ]
+            ]
+        ]
+
+        // Non-send route whose only `throw` is nested inside a `for` loop.
+        // `route_fail_mode` recurses into the loop, so the route is a
+        // `RouteResult` fail surface; the loop must fold monadically
+        // (`foldlM`) so the throw propagates instead of being dropped.
+        scanAll(items: Vec<u64>) => [
+            for x in items => [
+                if x > 100 => [
+                    throw 8
+                ]
+            ]
+        ]
+
+        // Send-bearing route with a `for` loop that can fail: the loop
+        // must fold over `w` monadically (not `Id.run do`, which cannot
+        // `throw`) so both the branch `throw` and the per-send revert
+        // propagate. Without the monadic fold this emitted invalid Lean.
+        broadcast(recipients: Vec<address>, n: u64) => [
+            for r in recipients => [
+                if n > 0 => [
+                    ~> r with { value: n }
+                ] else [
+                    throw 11
+                ]
+            ]
+        ]
+    }
+
+    m_count: u64 {
+        in create() => 0
+    }
+}

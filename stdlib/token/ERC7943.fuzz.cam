@@ -1,0 +1,314 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Fuzz properties for the uRWA accounting layer.
+//
+// The permission properties (P0-7 … P0-9, the operator gates) are in
+// `ERC7943Min.fuzz.cam` and hold here by P0-1. What follows is the part that
+// only becomes a claim once the base's arithmetic is exact: the frozen split,
+// what a seizure does to the freeze, the emission, and the holder count.
+//
+// Every address is a fuzz parameter rather than a literal. Pinning them would
+// mean the aliasing cases — payer equal to payee, operator equal to holder —
+// are never drawn, and those are exactly the cases where a read-read-write-
+// write member transform inflates a balance. `ERC20.cam` shipped that defect
+// past a suite of literal-address tests.
+
+// ── P0-2 / P0-12: the split ─────────────────────────────────────────────
+
+property "below the balance the two parts add back to it"
+        (op: address, holder: address, frz: U256) for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume frz <= 1000
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, frz)
+
+    call getFrozenTokens(holder)
+    expect return frz
+    call unfrozenTokens(holder)
+    expect return 1000 - frz
+
+    fuzz { frz in 0..1000 }
+}
+
+property "above the balance the unfrozen part is empty"
+        (op: address, holder: address, frz: U256) for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume frz > 1000
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, frz)
+
+    call getFrozenTokens(holder)
+    expect return frz
+    call unfrozenTokens(holder)
+    expect return 0
+
+    fuzz { frz in 1001..100000 }
+}
+
+// ── S02: a transfer within the unfrozen part ────────────────────────────
+
+property "a transfer within the unfrozen part leaves the freeze alone"
+        (op: address, holder: address, payee: address, frz: U256, amount: U256)
+        for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != payee
+    assume frz <= 1000
+    assume amount > 0 && amount <= 1000 - frz
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, frz)
+
+    msg { sender: holder }
+    call transfer(payee, amount)
+
+    call balanceOf(holder)
+    expect return 1000 - amount
+    call balanceOf(payee)
+    expect return amount
+    call getFrozenTokens(holder)
+    expect return frz
+    call totalSupply()
+    expect return 1000
+
+    fuzz { frz in 0..999, amount in 1..1000 }
+}
+
+// ── S05: a seizure reaching into the frozen part ────────────────────────
+//
+// The clamp, quantified. `remaining` is below the freeze by construction, so
+// each draw exercises the branch that lowers it, and the assertion names the
+// balance rather than a constant — an implementation that lowered the freeze
+// by the seized amount instead of down to the balance passes the one unit
+// test that happens to make those equal, and fails here.
+
+property "a seizure into the frozen part lowers the freeze to the balance"
+        (op: address, holder: address, payee: address, frz: U256, amount: U256)
+        for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != payee
+    assume frz <= 1000
+    assume amount > 1000 - frz && amount <= 1000
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, frz)
+    msg { sender: op }
+    call forcedTransfer(holder, payee, amount)
+
+    call balanceOf(holder)
+    expect return 1000 - amount
+    call balanceOf(payee)
+    expect return amount
+    call getFrozenTokens(holder)
+    expect return 1000 - amount
+    call unfrozenTokens(holder)
+    expect return 0
+    call totalSupply()
+    expect return 1000
+
+    fuzz { frz in 1..1000, amount in 1..1000 }
+}
+
+property "a seizure within the unfrozen part keeps the freeze where it was"
+        (op: address, holder: address, payee: address, frz: U256, amount: U256)
+        for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != payee
+    assume frz <= 1000
+    assume amount > 0 && amount <= 1000 - frz
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, frz)
+    msg { sender: op }
+    call forcedTransfer(holder, payee, amount)
+
+    call getFrozenTokens(holder)
+    expect return frz
+    call unfrozenTokens(holder)
+    expect return 1000 - frz - amount
+
+    fuzz { frz in 0..999, amount in 1..1000 }
+}
+
+// ── P0-3: a seizure is a move, never an issue ───────────────────────────
+
+property "a seizure conserves the emission"
+        (op: address, holder: address, payee: address, amount: U256) for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume amount > 0 && amount <= 1000
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: op }
+    call forcedTransfer(holder, payee, amount)
+
+    call totalSupply()
+    expect return 1000
+
+    fuzz { amount in 1..1000 }
+}
+
+// The aliasing case of the route above, drawn on purpose.
+//
+// `payee` is the holder, so the credit and the debit hit the same key. Without
+// the guard in `m_balances` the credit overwrites the debit and the account
+// gains `amount` from nowhere — the emission still balances, so a totalSupply
+// invariant stays green while the token mints.
+property "a self seizure creates nothing"
+        (op: address, holder: address, amount: U256) for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume amount > 0 && amount <= 1000
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: op }
+    call forcedTransfer(holder, holder, amount)
+
+    call balanceOf(holder)
+    expect return 1000
+    call holderCount()
+    expect return 1
+
+    fuzz { amount in 1..1000 }
+}
+
+property "a self transfer creates nothing"
+        (op: address, holder: address, amount: U256) for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume amount > 0 && amount <= 1000
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: holder }
+    call transfer(holder, amount)
+
+    call balanceOf(holder)
+    expect return 1000
+    call holderCount()
+    expect return 1
+
+    fuzz { amount in 1..1000 }
+}
+
+// ── P1-3 / P1-4: burn ───────────────────────────────────────────────────
+
+property "a burn takes from the balance and the emission and nothing else"
+        (op: address, holder: address, frz: U256, amount: U256) for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume frz <= 1000
+    assume amount > 0 && amount <= 1000 - frz
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, frz)
+
+    msg { sender: holder }
+    call burn(amount)
+
+    call balanceOf(holder)
+    expect return 1000 - amount
+    call totalSupply()
+    expect return 1000 - amount
+    call getFrozenTokens(holder)
+    expect return frz
+
+    fuzz { frz in 0..999, amount in 1..1000 }
+}
+
+property "a frozen amount cannot be burned"
+        (op: address, holder: address, frz: U256, amount: U256) for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume frz <= 1000
+    assume amount > 1000 - frz && amount <= 1000
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, frz)
+
+    msg { sender: holder }
+    call burn(amount)
+    expect throw 10
+
+    call totalSupply()
+    expect return 1000
+
+    fuzz { frz in 1..1000, amount in 1..1000 }
+}
+
+// ── S06: the holder count ───────────────────────────────────────────────
+
+property "a partial transfer to a fresh address adds one holder"
+        (op: address, holder: address, payee: address, amount: U256) for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != payee
+    assume amount > 0 && amount < 1000
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: holder }
+    call transfer(payee, amount)
+
+    call holderCount()
+    expect return 2
+
+    fuzz { amount in 1..999 }
+}
+
+property "emptying an account into a fresh one keeps the count"
+        (op: address, holder: address, payee: address) for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != payee
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: holder }
+    call transfer(payee, 1000)
+
+    call holderCount()
+    expect return 1
+    call balanceOf(holder)
+    expect return 0
+    call balanceOf(payee)
+    expect return 1000
+}
+
+// A mint to an address that already holds must not double-count it. The
+// operator and the holder are drawn independently, so the case where the
+// operator mints to itself is in the draw set too.
+property "minting to a holder adds no holder"
+        (op: address, holder: address, amount: U256) for ERC7943 {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume amount > 0 && amount <= 1000
+
+    call constructor("uRWA Token", "URWA", 18, op, holder, 1000)
+    msg { sender: op }
+    call mint(holder, amount)
+
+    call holderCount()
+    expect return 1
+    call totalSupply()
+    expect return 1000 + amount
+
+    fuzz { amount in 1..1000 }
+}

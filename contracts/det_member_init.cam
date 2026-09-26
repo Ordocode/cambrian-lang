@@ -1,0 +1,48 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Gap 5 fixture: Entity.address(...) and addressOf(Entity.state(...)) used
+// inside a member-transform body of an init route. The auto-generated
+// constructor (or initialize() if non-identity init params are present)
+// must store the CREATE2-predicted address in the typed Address<Entity>
+// member.
+
+entity OtherEntity {
+    identity m_id: u64
+    routes {
+        #[factory_only]
+        constructor() => []
+        ping() from Owner(m_id) => []
+        getCount() -> u64 => [ return(m_count) ]
+    }
+    m_count: u64 {
+        in constructor() => 0
+        in ping() => m_count + 1
+    }
+}
+
+entity Owner {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        poke() => [
+            ping() ~> m_other_dot
+        ]
+        pokeAddrOf() => [
+            ping() ~> m_other_aof
+        ]
+    }
+
+    // Initialised via the dot-method spelling.
+    m_other_dot: Address<OtherEntity> {
+        in constructor() => OtherEntity.address(m_id)
+    }
+
+    // Initialised via the addressOf(Entity.state(args)) spelling — must
+    // resolve to the same CREATE2 address.
+    m_other_aof: Address<OtherEntity> {
+        in constructor() => addressOf(OtherEntity.state(m_id))
+    }
+}

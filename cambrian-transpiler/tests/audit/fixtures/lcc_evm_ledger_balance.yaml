@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: lcc-evm-ledger-balance
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - lcc_ledger_balance.cam

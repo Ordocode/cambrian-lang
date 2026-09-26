@@ -1,0 +1,53 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Phase Library-4 fixture: PaymentForwarder
+//
+// Demonstrates `@solidity_import("...")` on `extern entity`
+// declarations. The Cambrian source declares the foreign surface
+// (`IERC20`, `Ownable`) against the imported OpenZeppelin types; the
+// EVM emitter prepends `import "@openzeppelin/...";` to the generated
+// `.sol` and suppresses its synthetic `interface I<name> { ... }`
+// block. Foundry resolves the `@openzeppelin/` prefix through the
+// remappings declared in `project.yaml -> foundry.remappings`.
+//
+// The author keeps the `extern entity` body in sync with the imported
+// Solidity surface manually — there is no static cross-check between
+// the two. Mismatches surface at solc compile time.
+
+@solidity_import("@openzeppelin/contracts/token/ERC20/IERC20.sol")
+extern entity IERC20 {
+    route transfer(to: address, amount: U256) -> bool;
+    route transferFrom(src: address, to: address, amount: U256) -> bool;
+    view route balanceOf(who: address) -> U256;
+    view route allowance(owner: address, spender: address) -> U256;
+}
+
+@solidity_import("@openzeppelin/contracts/access/Ownable.sol")
+extern entity Ownable {
+    view route owner() -> address;
+}
+
+entity PaymentForwarder {
+    routes {
+        #[factory_only]
+        constructor(t: Address<IERC20>, beneficiary: Address<Ownable>) => []
+        // Forward `amount` tokens to the beneficiary's current
+        // `owner()`. Exercises both extern entities in one route: a
+        // `view` call on Ownable + a state-mutating call on IERC20.
+        forward(amount: U256) => [
+            read: [
+                var dst = owner() ~> m_beneficiary;
+            ]
+            send: [
+                transfer(dst, amount) ~> m_token
+            ]
+        ]
+    }
+    m_token: Address<IERC20> {
+        in constructor(t, _) => t
+    }
+    m_beneficiary: Address<Ownable> {
+        in constructor(_, beneficiary) => beneficiary
+    }
+}

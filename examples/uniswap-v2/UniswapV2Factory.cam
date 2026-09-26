@@ -1,0 +1,147 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// UniswapV2Factory — Cambrian re-expression of the OZ V2 Core factory.
+// **Singleton** (no `identity`) — there is one factory per deployment.
+//
+// Idiomatic translation:
+//
+//   - The OZ contract is itself the CREATE2 deployer of `UniswapV2Pair`
+//     instances; in Cambrian the **auto-generated `CambrianFactory`**
+//     does that work whenever a `deploy UniswapV2Pair(t0, t1)` action
+//     fires. So this entity stays free of any inline-assembly /
+//     `creationCode` / hand-rolled salt computation — it just emits a
+//     `deploy` action and lets the transpiler lower it into the right
+//     `CambrianFactory.deployUniswapV2Pair(t0, t1)` call.
+//   - `getPair[token0][token1] -> address` becomes a single
+//     `m_get_pair: HashMap<U256, address>` keyed by `hashOf(t0, t1)`.
+//     We store both directions (`(t0,t1)` and `(t1,t0)`) so callers can
+//     query without sorting first, exactly like the OZ contract.
+//   - `address[] allPairs` is mapped 1:1 to `m_all_pairs: Vec<address>`,
+//     and `allPairsLength()` reads `m_all_pairs.len()` (G-U3
+//     RESOLVED — the EVM backend lowers `m_all_pairs.push(...)` as a
+//     statement-shaped transform).
+//   - `feeTo` / `feeToSetter` are plain `address` members; the setters
+//     gate on `from m_fee_to_setter` (which lowers to a `CREATE2`-aware
+//     `msg.sender ==` check in deterministic mode if `m_fee_to_setter`
+//     is itself an entity address — for a plain EOA setter it just
+//     compares against the stored slot).
+//
+// Top-level pure helpers used only by this file:
+
+pure fn min_addr(a: address, b: address) -> address {
+    if a < b { a } else { b }
+}
+
+pure fn max_addr(a: address, b: address) -> address {
+    if a > b { a } else { b }
+}
+
+pure fn pair_key(a: address, b: address) -> U256 {
+    hashOf(min_addr(a, b), max_addr(a, b))
+}
+
+entity UniswapV2Factory {
+
+    routes {
+        #[factory_only]
+        constructor(fee_to_setter: address) => []
+
+        // OZ `createPair(tokenA, tokenB)`. Sorts to `(t0, t1)` with
+        // `t0 < t1`, rejects identical / zero / duplicate pairs, then
+        // deploys via the auto-`CambrianFactory`. The deployed pair's
+        // address is `UniswapV2Pair.address(t0, t1)`, predictable from
+        // these arguments alone (G-U4 surface). Zero-address guards
+        // use 40-nibble hex literals; G-U7 makes those infer as
+        // `address` so the comparison typechecks against the
+        // `address`-typed token params.
+        createPair(tokenA: address, tokenB: address)
+            where tokenA != tokenB                                 : throw 1 &&
+                  tokenA != 0x0000000000000000000000000000000000000000 : throw 2 &&
+                  tokenB != 0x0000000000000000000000000000000000000000 : throw 2 &&
+                  m_get_pair[pair_key(tokenA, tokenB)]
+                      == 0x0000000000000000000000000000000000000000   : throw 3
+        => [
+            deploy UniswapV2Pair(min_addr(tokenA, tokenB),
+                                  max_addr(tokenA, tokenB))
+        ]
+
+        // OZ `setFeeTo(address)` / `setFeeToSetter(address)`. Both are
+        // gated on `msg::sender == m_fee_to_setter`. We use a manual
+        // comparison rather than `from m_fee_to_setter` because
+        // `m_fee_to_setter` is a plain EOA, not a typed entity address
+        // (the `from Entity(args)` clause is for predictable contract
+        // senders).
+        setFeeTo(new_fee_to: address)
+            where msg::sender == m_fee_to_setter : throw 10
+        => []
+
+        setFeeToSetter(new_setter: address)
+            where msg::sender == m_fee_to_setter : throw 10
+        => []
+
+        view getPair(tokenA: address, tokenB: address) -> address => [
+            return(m_get_pair[hashOf(min_addr(tokenA, tokenB),
+                                      max_addr(tokenA, tokenB))])
+        ]
+
+        view allPairs(index: u64) -> address => [
+            return(m_all_pairs[index])
+        ]
+
+        view allPairsLength() -> U256 => [
+            return(m_all_pairs.len())
+        ]
+
+        view feeTo() -> address => [
+            return(m_fee_to)
+        ]
+
+        view feeToSetter() -> address => [
+            return(m_fee_to_setter)
+        ]
+    }
+
+    // `m_get_pair[hashOf(t0, t1)] = pair_address` populated in both
+    // directions on every `createPair`. Mirrors OZ's
+    // `getPair[t0][t1] = getPair[t1][t0] = pair`. G-U8 makes
+    // per-transform `let` bindings local to their own `{ ... }`
+    // scope, so we can compute the deterministic pair address once
+    // and reuse it across both `.update(...)` calls (and across the
+    // sibling `m_all_pairs.push(...)` transform below).
+    m_get_pair: HashMap<U256, address> {
+        in createPair(tokenA, tokenB) => {
+            let t0 = min_addr(tokenA, tokenB);
+            let t1 = max_addr(tokenA, tokenB);
+            let pair = UniswapV2Pair.address(t0, t1);
+            m_get_pair
+                .update(hashOf(t0, t1), pair)
+                .update(hashOf(t1, t0), pair)
+        }
+    }
+
+    // OZ `address[] public allPairs;` — Cambrian's EVM backend lowers
+    // `m_all_pairs.push(...)` as a statement-shaped transform
+    // (G-U3), so this maps 1:1 to upstream. `allPairsLength()` reads
+    // `m_all_pairs.len()` and the auto-emitted `allPairs(uint256)`
+    // getter is provided by Solidity for any public dynamic array.
+    // G-U8: this transform redeclares `pair` in its own scope —
+    // independent of the same-named binding in the `m_get_pair`
+    // transform above.
+    m_all_pairs: Vec<address> {
+        in createPair(tokenA, tokenB) => {
+            let pair = UniswapV2Pair.address(min_addr(tokenA, tokenB),
+                                              max_addr(tokenA, tokenB));
+            m_all_pairs.push(pair)
+        }
+    }
+
+    m_fee_to: address {
+        in setFeeTo(new_fee_to) => new_fee_to
+    }
+
+    m_fee_to_setter: address {
+        in constructor(setter)              => setter
+        in setFeeToSetter(new_setter)        => new_setter
+    }
+}

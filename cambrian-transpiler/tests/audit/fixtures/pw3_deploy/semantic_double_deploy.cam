@@ -1,0 +1,40 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-002: structurally different deploy args that are semantically equal (CREATE2 collision).
+
+entity Vault {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        getMarker() -> u64 => [
+            return(m_marker)
+        ]
+    }
+
+    m_marker: u64 {
+        in constructor() => 1
+    }
+}
+
+entity Deployer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        respawn() => [
+            deploy Vault(0)
+            deploy Vault(0 + 0)
+        ]
+    }
+
+    m_spawns: u64 {
+        in constructor() => 0
+        in respawn() => m_spawns + 1
+    }
+}

@@ -1,0 +1,47 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// LCC cross-target repro: ledger-post balance transforms (wasm fixed; EVM/Lean untested).
+pure fn cobol_unstring_csv(src: String, delim: String) -> Vec<String> {
+    src.split(delim).collect()
+}
+
+pure fn cobol_unstring_csv_field(csv: Vec<String>, index: u64) -> String {
+    csv[index]
+}
+
+pure fn parse_u64_field(csv: Vec<String>, index: u64) -> u64 {
+    match std::str::parse_uint(cobol_unstring_csv_field(csv, index), 10) {
+        some(x) => x,
+        none => 0,
+    }
+}
+
+pure fn parse_i64_field(csv: Vec<String>, index: u64) -> i64 {
+    match std::str::parse_int(cobol_unstring_csv_field(csv, index), 10) {
+        some(x) => x,
+        none => 0,
+    }
+}
+
+entity Ledger {
+    routes {
+        run(lk_input: String) -> String => [
+            return(std::str::format("{}", ws_balance))
+        ]
+    }
+
+    ws_balance: i64 {
+        in run(lk_input) => parse_i64_field(cobol_unstring_csv(lk_input, ","), 0)
+        in run(lk_input) => ws_balance - ws_debit
+        in run(lk_input) => ws_balance + ws_credit
+    }
+
+    ws_credit: u64 {
+        in run(lk_input) => parse_u64_field(cobol_unstring_csv(lk_input, ","), 2)
+    }
+
+    ws_debit: u64 {
+        in run(lk_input) => parse_u64_field(cobol_unstring_csv(lk_input, ","), 1)
+    }
+}

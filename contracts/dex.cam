@@ -1,0 +1,171 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Constant-product AMM (Automated Market Maker) in Cambrian
+// Exercises: complex arithmetic, paired state updates, fee calculation,
+//            multiple members updated in same route, pure fn chains,
+//            record construction/update, view routes, nested HashMap
+
+type Amount = U256
+type TokenId = u64
+
+pure fn min_amount(a: Amount, b: Amount) -> Amount {
+    if a <= b { a } else { b }
+}
+
+pure fn calc_output(amount_in: Amount, reserve_in: Amount, reserve_out: Amount, fee_bps: u64) -> Amount {
+    let amount_with_fee = amount_in * (10_000 - fee_bps as Amount);
+    let numerator = amount_with_fee * reserve_out;
+    let denominator = reserve_in * 10_000 + amount_with_fee;
+    numerator / denominator
+}
+
+pure fn calc_lp_tokens(amount_a: Amount, amount_b: Amount, reserve_a: Amount, reserve_b: Amount, total_lp: Amount) -> Amount {
+    if total_lp == 0 {
+        amount_a * amount_b
+    } else {
+        let lp_a = amount_a * total_lp / reserve_a;
+        let lp_b = amount_b * total_lp / reserve_b;
+        min_amount(lp_a, lp_b)
+    }
+}
+
+pure fn calc_withdraw_a(lp_amount: Amount, total_lp: Amount, reserve_a: Amount) -> Amount {
+    lp_amount * reserve_a / total_lp
+}
+
+pure fn calc_withdraw_b(lp_amount: Amount, total_lp: Amount, reserve_b: Amount) -> Amount {
+    lp_amount * reserve_b / total_lp
+}
+
+entity Dex {
+
+    const ERROR_POOL_EXISTS: u8 = 1
+    const ERROR_POOL_NOT_FOUND: u8 = 2
+    const ERROR_ZERO_AMOUNT: u8 = 3
+    const ERROR_INSUFFICIENT_LP: u8 = 4
+    const ERROR_SLIPPAGE: u8 = 6
+    const DEFAULT_FEE_BPS: u64 = 30
+
+    record Pool {
+        token_a: TokenId,
+        token_b: TokenId,
+        reserve_a: Amount,
+        reserve_b: Amount,
+        total_lp: Amount,
+        fee_bps: u64
+    }
+
+    routes {
+        constructor() => []
+
+        createPool(token_a: TokenId, token_b: TokenId)
+            where !m_pools.exists(token_a) : throw 1 => []
+
+        addLiquidity(token_a: TokenId, amount_a: Amount, amount_b: Amount)
+            where m_pools.exists(token_a) : throw 2 &&
+                  amount_a > 0 : throw 3 &&
+                  amount_b > 0 : throw 3 => []
+
+        removeLiquidity(token_a: TokenId, lp_amount: Amount)
+            where m_pools.exists(token_a) : throw 2 &&
+                  lp_amount > 0 : throw 3 => []
+
+        swap(token_in: TokenId, amount_in: Amount, min_out: Amount)
+            where m_pools.exists(token_in) : throw 2 &&
+                  amount_in > 0 : throw 3 => []
+
+        view getReserves(token_a: TokenId) -> Amount
+            where m_pools.exists(token_a) : throw 2 => [
+            let p = m_pools[token_a];
+            return(p.reserve_a)
+        ]
+
+        view getQuote(token_in: TokenId, amount_in: Amount) -> Amount
+            where m_pools.exists(token_in) : throw 2 => [
+            let pool = m_pools[token_in];
+            return(calc_output(amount_in, pool.reserve_a, pool.reserve_b, pool.fee_bps))
+        ]
+
+        view getLpBalance(token_a: TokenId, owner: address) -> Amount
+            where m_pools.exists(token_a) : throw 2 => [
+            let balance = if m_lp_balances.exists(owner) {
+                let inner = m_lp_balances[owner];
+                if inner.exists(token_a) { inner[token_a] } else { 0 }
+            } else {
+                0
+            };
+            return(balance)
+        ]
+    }
+
+    m_pool_count: u64 {
+        in constructor() => 0
+        in createPool(_, _) => m_pool_count + 1
+    }
+
+    m_pools: HashMap<TokenId, Pool> {
+        in createPool(token_a, token_b) => {
+            let pool = Pool {
+                token_a: token_a,
+                token_b: token_b,
+                reserve_a: 0,
+                reserve_b: 0,
+                total_lp: 0,
+                fee_bps: 30
+            };
+            {}.insert(token_a, pool)
+        }
+        in addLiquidity(token_a, amount_a, amount_b) => {
+            let pool = m_pools[token_a];
+            let new_lp = calc_lp_tokens(amount_a, amount_b, pool.reserve_a, pool.reserve_b, pool.total_lp);
+            let updated = pool {
+                reserve_a: pool.reserve_a + amount_a,
+                reserve_b: pool.reserve_b + amount_b,
+                total_lp: pool.total_lp + new_lp
+            };
+            m_pools.update(token_a, updated)
+        }
+        in removeLiquidity(token_a, lp_amount) => {
+            let pool = m_pools[token_a];
+            let out_a = calc_withdraw_a(lp_amount, pool.total_lp, pool.reserve_a);
+            let out_b = calc_withdraw_b(lp_amount, pool.total_lp, pool.reserve_b);
+            let updated = pool {
+                reserve_a: pool.reserve_a - out_a,
+                reserve_b: pool.reserve_b - out_b,
+                total_lp: pool.total_lp - lp_amount
+            };
+            m_pools.update(token_a, updated)
+        }
+        in swap(token_in, amount_in, _) => {
+            let pool = m_pools[token_in];
+            let amount_out = calc_output(amount_in, pool.reserve_a, pool.reserve_b, pool.fee_bps);
+            let updated = pool {
+                reserve_a: pool.reserve_a + amount_in,
+                reserve_b: pool.reserve_b - amount_out
+            };
+            m_pools.update(token_in, updated)
+        }
+    }
+
+    m_lp_balances: HashMap<address, HashMap<TokenId, Amount>> {
+        in addLiquidity(token_a, amount_a, amount_b) => {
+            let pool = m_pools[token_a];
+            let new_lp = calc_lp_tokens(amount_a, amount_b, pool.reserve_a, pool.reserve_b, pool.total_lp);
+            let sender = msg::sender;
+            let inner = if m_lp_balances.exists(sender) {
+                m_lp_balances[sender]
+            } else {
+                {}
+            };
+            let current = if inner.exists(token_a) { inner[token_a] } else { 0 };
+            m_lp_balances.update(sender, inner.update(token_a, current + new_lp))
+        }
+        in removeLiquidity(token_a, lp_amount) => {
+            let sender = msg::sender;
+            let inner = m_lp_balances[sender];
+            let current = inner[token_a];
+            m_lp_balances.update(sender, inner.update(token_a, current - lp_amount))
+        }
+    }
+}

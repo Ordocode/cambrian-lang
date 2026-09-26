@@ -1,0 +1,22 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-014 / H-AX-04-03: entity for mapping-pin differential.
+
+entity MapPinProbe {
+    routes {
+        #[factory_only]
+        init setup() => []
+
+        credit(key: address, amt: u64) => []
+
+        read(key: address) -> u64 => [
+            return(m_balances[key])
+        ]
+    }
+
+    m_balances: HashMap<address, u64> {
+        in setup() => HashMap::new()
+        in credit(key, amt) => m_balances.update(key, m_balances[key] + amt)
+    }
+}

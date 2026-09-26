@@ -1,0 +1,14 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-EVM-IR-001 / PM-012: mixed-width binop must keep explicit widen in lowering.
+
+entity Mix {
+    routes {
+        mix(a: u8, b: u64) -> u64 => [
+            return(a + b)
+        ]
+    }
+
+    m_x: u64 {}
+}

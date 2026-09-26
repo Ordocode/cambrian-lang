@@ -1,0 +1,38 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// P3 multi-instance fixture: an entity with `identity` members so the
+// `World.storage.pair` slot is genuinely keyed by a non-trivial
+// `Pair.Identity` tuple. Exercises:
+//   * `Pair.Identity` deriving `DecidableEq` (P3.2),
+//   * `Cambrian.Generated.World.withPair` round-trip per `id` (P3.3),
+//   * per-entity `Pair.address` CREATE2 derivation with a non-empty
+//     salt (P3.4),
+//   * spec theorems that pin a specific `Pair` instance via
+//     `let inst : Pair.Identity := { left := …, right := … }`
+//     (P3.7).
+
+entity Pair {
+    identity left: u64
+    identity right: u64
+
+    routes {
+        init create() => [ ]
+
+        bump(amount: u64) => [ ]
+
+        sum() -> u64 => [
+            return(left + right + m_acc)
+        ]
+    }
+
+    m_acc: u64 {
+        in create() => 0
+        in bump(amount) => m_acc + amount
+    }
+}
+
+test "bump-once accumulates" for Pair with { left: 3, right: 4 } {
+    call bump(10)
+    expect state { m_acc: 10 }
+}

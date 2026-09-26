@@ -1,0 +1,13 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity Pair {
+    routes {
+        constructor() => []
+        view token0() -> address => [ return(m_token0) ]
+        view token1() -> address => [ return(m_token1) ]
+    }
+
+    identity m_token0: address
+    identity m_token1: address
+}

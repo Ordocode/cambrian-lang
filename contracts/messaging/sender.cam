@@ -1,0 +1,18 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity Sender {
+
+    routes {
+        sendValue(dest: Address<Receiver>, value: u64) => [
+            acceptValue(value) ~> dest
+        ]
+        getSent() -> u64 => [
+            return(m_last_sent)
+        ]
+    }
+
+    m_last_sent: u64 {
+        in sendValue(_, value) => value
+    }
+}

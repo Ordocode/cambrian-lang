@@ -1,0 +1,32 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PN-101: phased extern var-call — pay phase CALL before settle SSTORE (CEI window).
+
+extern entity Callback {
+    route onPay(amount: u64) -> bool;
+}
+
+entity Vault {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor(cb: Address<Callback>, seed: u64) => []
+        withdraw() => [
+            pay: [
+                var ok = onPay(m_bal) ~> m_cb;
+            ]
+            settle: []
+        ]
+        getBal() -> u64 => [ return(m_bal) ]
+    }
+
+    m_cb: Address<Callback> {
+        in constructor(cb, seed) => cb
+    }
+    m_bal: u64 {
+        in constructor(cb, seed) => seed
+        in withdraw() => settle: 0
+    }
+}

@@ -1,0 +1,12 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: x-h7-evm-audit
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - x_h7_runtrace_continue.cam
+
+invariant:
+  fail_on_revert: false

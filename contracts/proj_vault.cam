@@ -1,0 +1,21 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity Vault {
+    identity m_id: u64
+
+    routes {
+        constructor() => []
+        deposit(amount: u64)
+            where amount > 0 : throw 1
+            => []
+        getBalance() -> u64 => [
+            return(m_balance)
+        ]
+    }
+
+    m_balance: u64 {
+        in constructor() => 0
+        in deposit(amount) => m_balance + amount
+    }
+}

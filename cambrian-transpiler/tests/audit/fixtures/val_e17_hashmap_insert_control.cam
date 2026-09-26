@@ -1,0 +1,15 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-VAL-006 control: recognised insert transform must not trigger E17.
+
+entity X {
+    routes {
+        push(k: address, v: u64) => []
+    }
+
+    m_dummy: u64 {}
+    m_map: HashMap<address, u64> {
+        in push(k, v) => m_map.insert(k, v)
+    }
+}

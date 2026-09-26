@@ -1,0 +1,54 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Gap 6 fixture: an entity with NO `identity` members (singleton). Both the
+// auto-generated factory and from-clause checks must handle the zero-arg
+// CREATE2 case correctly.
+//
+// - GlobalRegistry has no identity members.
+// - SomeCaller sends to GlobalRegistry (`~> GlobalRegistry.address()`) and
+//   verifies a callback came from it (`from GlobalRegistry()`).
+
+entity GlobalRegistry {
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        ping(callerId: u64) => [
+            notify() ~> SomeCaller.address(callerId)
+        ]
+        getCount() -> u64 => [ return(m_pings) ]
+    }
+
+    m_pings: u64 {
+        in constructor() => 0
+        in ping(_) => m_pings + 1
+    }
+}
+
+entity SomeCaller {
+
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        // Outbound: send to singleton (zero-arg CREATE2)
+        invoke() => [
+            ping(m_id) ~> GlobalRegistry.address()
+        ]
+
+        // Inbound: callback from singleton
+        notify()
+            from GlobalRegistry()
+            => []
+
+        getNotifications() -> u64 => [ return(m_notifications) ]
+    }
+
+    m_notifications: u64 {
+        in constructor() => 0
+        in notify() => m_notifications + 1
+    }
+}

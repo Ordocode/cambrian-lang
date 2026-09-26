@@ -1,0 +1,1951 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+use crate::ast::*;
+
+grammar;
+
+extern {
+    type Error = &'static str;
+}
+
+match {
+    r"\s+" => {},
+    r"//[^\n\r]*[\n\r]*" => {},
+
+    "use",
+    "import",
+    "library",
+    "using",
+    "pure", "fn", "entity", "record", "enum", "const", "macro", "routes",
+    "if", "else", "let", "in", "as", "match", "type", "view", "from",
+    "true", "false", "some", "none", "array", "for", "init", "accept",
+    "where", "throw", "return", "with", "onBounce", "identity", "deploy",
+    "rescue", "recover", "private", "call", "var",
+    "test", "expect", "effects", "skip", "registry",
+    "fuzz", "property", "assume", "bound",
+    "invariant", "action", "check", "senders", "ctx",
+    "track", "derived", "exclude", "selectors", "advanceTime",
+    "address_of", "cam_encode",
+    "extern", "route",
+    "event", "indexed", "emit",
+    "error",
+    "solidity_import",
+
+    "=>", "->", "~>", "::", "..", "..=",
+    "&&", "||",
+    "==", "!=", "<=", ">=",
+    "<<", ">>",
+    "msg::",
+    "sys::",
+    "trace::",
+    "+", "-", "*", "/", "%",
+    "+%", "-%", "*%",
+    "&", "|",
+    "<", ">",
+    "!", "@", "^", "#",
+    "(", ")", "{", "}", "[", "]",
+    ",", ":", ";", ".",
+    "=",
+    "_",
+
+    r"0x[0-9a-fA-F]+" => HexLit,
+    r"0b[01][01_]*" => BinLit,
+    r"[0-9][0-9_]*" => IntLit,
+    r#"b"[^"]*""# => BytesLit,
+    r#""[^"]*""# => StrLit,
+    r"[a-zA-Z_][a-zA-Z0-9_]*" => Ident,
+}
+
+// ===========================================================================
+// Top-level
+// ===========================================================================
+
+pub Program: Program = {
+    <items:TopLevelItem*> => {
+        let mut p = Program { imports: vec![], file_imports: vec![], pure_fns: vec![], type_aliases: vec![], records: vec![], enums: vec![], entities: vec![], extern_entities: vec![], tests: vec![], properties: vec![], fuzz_tests: vec![], invariants: vec![], events: vec![], errors: vec![], libraries: vec![], using_decls: vec![] };
+        for item in items {
+            match item {
+                TopLevel::Import(i) => p.imports.push(i),
+                TopLevel::ImportFile(i) => p.file_imports.push(i),
+                TopLevel::PureFn(f) => p.pure_fns.push(f),
+                TopLevel::TypeAlias(t) => p.type_aliases.push(t),
+                TopLevel::Record(r) => p.records.push(r),
+                TopLevel::Enum(e) => p.enums.push(e),
+                TopLevel::Entity(e) => p.entities.push(e),
+                TopLevel::ExternEntity(e) => p.extern_entities.push(e),
+                TopLevel::Test(t) => p.tests.push(t),
+                TopLevel::Property(pr) => p.properties.push(pr),
+                TopLevel::Invariant(i) => p.invariants.push(i),
+                TopLevel::Event(e) => p.events.push(e),
+                TopLevel::Error(e) => p.errors.push(e),
+                TopLevel::Library(l) => p.libraries.push(l),
+                TopLevel::Using(u) => p.using_decls.push(u),
+            }
+        }
+        p
+    }
+};
+
+TopLevelItem: TopLevel = {
+    ImportDecl => TopLevel::Import(<>),
+    ImportFileDecl => TopLevel::ImportFile(<>),
+    PureFnDecl => TopLevel::PureFn(<>),
+    TypeAliasDecl => TopLevel::TypeAlias(<>),
+    RecordDecl => TopLevel::Record(<>),
+    EnumDeclRule => TopLevel::Enum(<>),
+    EntityDecl => TopLevel::Entity(<>),
+    ExternEntityDecl => TopLevel::ExternEntity(<>),
+    TestDeclRule => TopLevel::Test(<>),
+    PropertyDeclRule => TopLevel::Property(<>),
+    InvariantDeclRule => TopLevel::Invariant(<>),
+    EventDeclRule => TopLevel::Event(<>),
+    ErrorDeclRule => TopLevel::Error(<>),
+    LibraryDeclRule => TopLevel::Library(<>),
+    UsingDeclRule => TopLevel::Using(<>),
+};
+
+// ===========================================================================
+// Import
+// ===========================================================================
+
+ImportDecl: Import = {
+    <l:@L> "use" <ns:IdentStr> <r:@R> => Import { namespace: ns, span: Span::new(l, r) },
+};
+
+// Phase Library-1: cross-file `.cam` import — `import "path/file.cam"`.
+//
+// Path is resolved relative to the importing file by the project loader
+// (see `project.rs::resolve_imports`). Library files (containing only
+// declarations, no `entity` / `test` / `fuzz` / `invariant`) can be
+// shared across projects without enumeration in `project.yaml`.
+ImportFileDecl: ImportFile = {
+    <l:@L> "import" <path:StrLitVal> <r:@R> => ImportFile { path, span: Span::new(l, r) },
+};
+
+// ===========================================================================
+// Phase Library-3: library declaration
+// ===========================================================================
+//
+// `library SafeMath {
+//     pure fn add(a: u256, b: u256) -> u256 { ... }
+//     const MAX: u256 = ...
+//     type Amount = u256
+// }`
+//
+// Body items are restricted to `pure fn`, `const`, and `type` (validator
+// V47). On EVM, lowers to a Solidity `library SafeMath { ... }` block.
+// On Acki Nacki, lowers to a Rust `mod safe_math { ... }` module.
+
+LibraryDeclRule: LibraryDecl = {
+    <l:@L> "library" <name:IdentStr> "{" <items:LibraryItem*> "}" <r:@R> => {
+        let mut lib = LibraryDecl {
+            name,
+            pure_fns: vec![],
+            constants: vec![],
+            type_aliases: vec![],
+            span: Span::new(l, r),
+        };
+        for item in items {
+            match item {
+                LibraryBodyItem::PureFn(f) => lib.pure_fns.push(f),
+                LibraryBodyItem::Const(c) => lib.constants.push(c),
+                LibraryBodyItem::TypeAlias(t) => lib.type_aliases.push(t),
+            }
+        }
+        lib
+    }
+};
+
+LibraryItem: LibraryBodyItem = {
+    PureFnDecl => LibraryBodyItem::PureFn(<>),
+    ConstDecl => LibraryBodyItem::Const(<>),
+    TypeAliasDecl => LibraryBodyItem::TypeAlias(<>),
+};
+
+// ===========================================================================
+// Phase Library-2: using directive
+// ===========================================================================
+//
+// `using { fn1, fn2 } for u256;`  — explicit free-function list
+// `using SafeMath for u256;`       — every `pure fn` from `library SafeMath`
+//
+// Pure AST rewrite: `x.fn1(y)` becomes `fn1(x, y)` at codegen time when
+// the receiver type matches. Works on user-defined `record` / `enum`
+// types too.
+
+UsingDeclRule: UsingDecl = {
+    <l:@L> "using" "{" <names:Comma<IdentStr>> "}" "for" <ty:Type> ";" <r:@R> => UsingDecl {
+        items: UsingItems::Functions(names),
+        target_type: ty,
+        span: Span::new(l, r),
+    },
+    <l:@L> "using" <lib:IdentStr> "for" <ty:Type> ";" <r:@R> => UsingDecl {
+        items: UsingItems::Library(lib),
+        target_type: ty,
+        span: Span::new(l, r),
+    },
+};
+
+// ===========================================================================
+// Pure function
+// ===========================================================================
+
+PureFnDecl: PureFn = {
+    <l:@L> "pure" "fn" <name:IdentStr> "(" <params:ParamList> ")" "->" <ret:Type> "{" <body:BlockBody> "}" <r:@R> => PureFn {
+        name,
+        params,
+        return_type: ret,
+        body,
+        span: Span::new(l, r),
+    }
+};
+
+ParamList: Vec<Param> = {
+    => vec![],
+    Comma<ParamDecl>,
+};
+
+ParamDecl: Param = {
+    <name:IdentStr> ":" <ty:Type> => Param { name, ty },
+};
+
+// ===========================================================================
+// Entity
+// ===========================================================================
+
+EntityDecl: Entity = {
+    <l:@L> "entity" <name:IdentStr> "{" <items:EntityItemDecl*> "}" <r:@R> => {
+        let mut e = Entity {
+            name,
+            records: vec![],
+            enums: vec![],
+            type_aliases: vec![],
+            constants: vec![],
+            macros: vec![],
+            routes: vec![],
+            members: vec![],
+            events: vec![],
+            errors: vec![],
+            span: Span::new(l, r),
+        };
+        for item in items {
+            match item {
+                EntityItem::Record(r) => e.records.push(r),
+                EntityItem::Enum(en) => e.enums.push(en),
+                EntityItem::TypeAlias(ta) => e.type_aliases.push(ta),
+                EntityItem::Const(c) => e.constants.push(c),
+                EntityItem::Macro(m) => e.macros.push(m),
+                EntityItem::Routes(rs) => e.routes.extend(rs),
+                EntityItem::Member(m) => e.members.push(m),
+                EntityItem::Event(ev) => e.events.push(ev),
+                EntityItem::Error(er) => e.errors.push(er),
+            }
+        }
+        e
+    }
+};
+
+EntityItemDecl: EntityItem = {
+    RecordDecl => EntityItem::Record(<>),
+    EnumDeclRule => EntityItem::Enum(<>),
+    TypeAliasDecl => EntityItem::TypeAlias(<>),
+    ConstDecl => EntityItem::Const(<>),
+    MacroDecl => EntityItem::Macro(<>),
+    RoutesBlock => EntityItem::Routes(<>),
+    MemberDecl => EntityItem::Member(<>),
+    EventDeclRule => EntityItem::Event(<>),
+    ErrorDeclRule => EntityItem::Error(<>),
+};
+
+// ===========================================================================
+// Extern entity — foreign-contract interface declaration
+// ===========================================================================
+//
+// `extern entity Token { route transfer(amount: U256); accept route deposit(); view route balanceOf(who: Address) -> U256; }`
+//
+// Body is a list of route signatures (no bodies), each terminated by `;`.
+// Lets the EVM target emit a populated `interface IToken { ... }` for
+// contracts compiled separately.
+
+ExternEntityDecl: ExternEntity = {
+    <l:@L> "extern" "entity" <name:IdentStr> "{"
+        <routes:ExternRouteSig*>
+    "}" <r:@R> => ExternEntity { name, routes, solidity_import: None, span: Span::new(l, r) },
+    // Phase Library-4: `@solidity_import("path")` annotation. When
+    // present, the EVM emitter prepends a `import "<path>";` directive
+    // to the output and skips its synthetic `interface IName { ... }`
+    // block. No effect on the Acki Nacki target.
+    <l:@L> "@" "solidity_import" "(" <p:StrLitVal> ")" "extern" "entity" <name:IdentStr> "{"
+        <routes:ExternRouteSig*>
+    "}" <r:@R> => ExternEntity { name, routes, solidity_import: Some(p), span: Span::new(l, r) },
+};
+
+ExternRouteSig: ExternRoute = {
+    <l:@L> "route" <name:IdentStr> "(" <params:ParamList> ")" <ret:ExternRouteRet?> ";" <r:@R> => ExternRoute {
+        name, params, return_type: ret, is_view: false, is_payable: false, span: Span::new(l, r),
+    },
+    <l:@L> "view" "route" <name:IdentStr> "(" <params:ParamList> ")" <ret:ExternRouteRet?> ";" <r:@R> => ExternRoute {
+        name, params, return_type: ret, is_view: true, is_payable: false, span: Span::new(l, r),
+    },
+    <l:@L> "accept" "route" <name:IdentStr> "(" <params:ParamList> ")" <ret:ExternRouteRet?> ";" <r:@R> => ExternRoute {
+        name, params, return_type: ret, is_view: false, is_payable: true, span: Span::new(l, r),
+    },
+};
+
+ExternRouteRet: Type = {
+    "->" <ty:Type> => ty,
+};
+
+// ===========================================================================
+// Phase EVM-P0-C: events + emit
+// ===========================================================================
+//
+// `event Transfer(indexed from: address, indexed to: address, value: U256);`
+//
+// Declared at program scope or inside `entity` blocks. Up to three
+// parameters may be marked `indexed`; the validator (V36) flags
+// excess. Codegen lowers to a Solidity `event` declaration on EVM
+// and to a noop comment + warning A01 on Acki Nacki.
+
+EventDeclRule: EventDecl = {
+    <l:@L> "event" <name:IdentStr> "(" <params:EventParamList> ")" ";" <r:@R> => EventDecl {
+        name,
+        params,
+        span: Span::new(l, r),
+    },
+};
+
+EventParamList: Vec<EventParam> = {
+    <ps:CommaEventParams?> => ps.unwrap_or_default(),
+};
+
+CommaEventParams: Vec<EventParam> = {
+    <p:EventParam> => vec![p],
+    <mut ps:CommaEventParams> "," <p:EventParam> => { ps.push(p); ps },
+};
+
+EventParam: EventParam = {
+    "indexed" <name:IdentStr> ":" <ty:Type> => EventParam { indexed: true,  name, ty },
+    <name:IdentStr> ":" <ty:Type> => EventParam { indexed: false, name, ty },
+};
+
+// ===========================================================================
+// Phase EVM-P0-D: error declarations
+// ===========================================================================
+//
+// `error InsufficientBalance(have: U256, need: U256);`
+// `error Unauthorized();` (parameterless)
+
+ErrorDeclRule: ErrorDecl = {
+    <l:@L> "error" <name:IdentStr> "(" <params:ParamList> ")" ";" <r:@R> => ErrorDecl {
+        name,
+        params,
+        span: Span::new(l, r),
+    },
+};
+
+// ===========================================================================
+// Test declarations
+// ===========================================================================
+
+// `#[tag("INV-XXX")]` attribute on test/fuzz decls. Surfaced on Foundry
+// as a function-name suffix and a leading marker in revert messages, so
+// audit-trail markers from a spec doc flow through to the generated
+// test report. Implemented as a generic `#[<name>(<arg>)]` parser that
+// only accepts `tag` for now; future extensions can hang off the same
+// rule.
+TestAttr: TestAttr = {
+    "#" "[" <n:IdentStr> "(" <s:StrLitVal> ")" "]" => TestAttr::Str(n, s),
+    "#" "[" <n:IdentStr> "(" <i:IntLitVal> ")" "]" =>? Ok(TestAttr::Int(n, crate::ast::int_literal_to_u128(i)?)),
+    "#" "[" <n:IdentStr> "]" => TestAttr::Flag(n),
+};
+
+TestDeclRule: TestDecl = {
+    <l:@L> <attrs:TestAttr*> "test" <name:StrLitVal> "for" <entity:IdentStr> "skip" "from"
+    "with" "{" <init:Comma<TestFieldAssign>> "}"
+    "{" <body:TestStep*> "}" <r:@R> => {
+        let link = catalog_decl_attrs(&attrs);
+        TestDecl {
+            name, entity_name: entity, init_state: init, skip_from: true, body,
+            tag: link.tag, instantiates: link.instantiates, span: Span::new(l, r),
+        }
+    },
+    <l:@L> <attrs:TestAttr*> "test" <name:StrLitVal> "for" <entity:IdentStr>
+    "with" "{" <init:Comma<TestFieldAssign>> "}"
+    "{" <body:TestStep*> "}" <r:@R> => {
+        let link = catalog_decl_attrs(&attrs);
+        TestDecl {
+            name, entity_name: entity, init_state: init, skip_from: false, body,
+            tag: link.tag, instantiates: link.instantiates, span: Span::new(l, r),
+        }
+    },
+    <l:@L> <attrs:TestAttr*> "test" <name:StrLitVal> "for" <entity:IdentStr> "skip" "from"
+    "{" <body:TestStep*> "}" <r:@R> => {
+        let link = catalog_decl_attrs(&attrs);
+        TestDecl {
+            name, entity_name: entity, init_state: vec![], skip_from: true, body,
+            tag: link.tag, instantiates: link.instantiates, span: Span::new(l, r),
+        }
+    },
+    <l:@L> <attrs:TestAttr*> "test" <name:StrLitVal> "for" <entity:IdentStr>
+    "{" <body:TestStep*> "}" <r:@R> => {
+        let link = catalog_decl_attrs(&attrs);
+        TestDecl {
+            name, entity_name: entity, init_state: vec![], skip_from: false, body,
+            tag: link.tag, instantiates: link.instantiates, span: Span::new(l, r),
+        }
+    },
+};
+
+// ----- Properties (abstract, parameterised statements) --------------------
+//
+// `property "name" (p: T, ...) for Entity [with { ... }] { <logical steps>
+// <test/fuzz instances> }`. Params attach to the property name (before
+// `for`), not the entity. The body mixes logical `TestStep`s (assume / call
+// / expect / context / let) with nested `test` / `fuzz` instances.
+
+// Optional parameter list: `(p: T, ...)` or nothing.
+PropertyParams: Vec<Param> = {
+    => vec![],
+    "(" <params:ParamList> ")" => params,
+};
+
+// Optional `with { field: value, ... }` initial-state block. Shared between
+// the property header default and per-instance overrides. Each entry is
+// either a concrete pin (`field: value`), a forall-ized state field
+// (`field: *`), a forall-ized context param (`msg::sender: *` /
+// `sys::timestamp: *`), or a bare `*` (forall over all state).
+PropInitOpt: (Vec<(String, Expr)>, ForallSpec) = {
+    => (vec![], ForallSpec::default()),
+    "with" "{" <entries:Comma<WithEntry>> "}" => collect_with(entries),
+};
+
+// A single entry inside a `with { ... }` clause. The `*` marker opts a target
+// into universal quantification (forall) for the Lean backend. Bare `*` after
+// `:` is unambiguous against a value expression: no `ExprOr` production whose
+// first token is `*` can be followed by `,`/`}`, so LR(1) reduces here.
+WithEntry: WithEntry = {
+    <name:IdentStr> ":" <val:TestFieldValue> => WithEntry::Pin(name, val),
+    <name:IdentStr> ":" "*" => WithEntry::ForallField(name),
+    "msg::" <field:IdentStr> ":" "*" => WithEntry::ForallCtx("msg".to_string(), field),
+    "sys::" <field:IdentStr> ":" "*" => WithEntry::ForallCtx("sys".to_string(), field),
+    "*" => WithEntry::ForallAll,
+};
+
+// A dedicated `ctx { ... }` block for blockchain/context parameters, kept
+// separate from the entity-state `with { ... }` clause. Each entry pins a
+// `msg::`/`sys::` field to a concrete value or forall-izes it with `*`.
+CtxBlockOpt: ContextSpec = {
+    => ContextSpec::default(),
+    "ctx" "{" <entries:Comma<CtxEntry>> "}" => ContextSpec { entries },
+};
+
+CtxEntry: ContextEntry = {
+    "msg::" <field:IdentStr> ":" "*" =>
+        ContextEntry { namespace: "msg".to_string(), field, value: None },
+    "sys::" <field:IdentStr> ":" "*" =>
+        ContextEntry { namespace: "sys".to_string(), field, value: None },
+    "msg::" <field:IdentStr> ":" <val:TestFieldValue> =>
+        ContextEntry { namespace: "msg".to_string(), field, value: Some(val) },
+    "sys::" <field:IdentStr> ":" <val:TestFieldValue> =>
+        ContextEntry { namespace: "sys".to_string(), field, value: Some(val) },
+};
+
+PropertyDeclRule: PropertyDecl = {
+    <l:@L> <attrs:TestAttr*> "property" <name:StrLitVal> <params:PropertyParams> "for" <entity:IdentStr>
+        <init:PropInitOpt>
+        <ctx:CtxBlockOpt>
+        "{" <items:PropertyBodyItem*> "}" <r:@R> =>
+        build_property(name, params, entity, init.0, init.1, ctx, items, attrs, Span::new(l, r)),
+};
+
+PropertyBodyItem: PropertyBodyItem = {
+    TestStep => PropertyBodyItem::Step(<>),
+    PropertyInstanceDecl => PropertyBodyItem::Instance(<>),
+};
+
+// `[#[runs(N)]] [#[skip_from]] (test|fuzz) ["name"] { <bindings> } [with { ... }]`
+PropInstanceKw: PropertyInstanceKind = {
+    "test" => PropertyInstanceKind::Test,
+    "fuzz" => PropertyInstanceKind::Fuzz,
+};
+
+StrLitOpt: Option<String> = {
+    => None,
+    <s:StrLitVal> => Some(s),
+};
+
+PropertyInstanceDecl: PropertyInstance = {
+    <l:@L> <attrs:TestAttr*> <kind:PropInstanceKw> <name:StrLitOpt> "{" <binds:Comma<InstanceBinding>> "}"
+        <init:PropInitOpt> <ctx:CtxBlockOpt> <r:@R> =>
+        build_property_instance(kind, name, binds, init.0, init.1, ctx, attrs, Span::new(l, r)),
+};
+
+// A single parameter binding inside an instance block. `p: value` supplies a
+// concrete value (test); `p in lo..hi` / `p in lo..=hi` supplies a sampling
+// range (fuzz). Validation enforces which form is legal for which kind.
+InstanceBinding: (String, InstanceArg) = {
+    <name:IdentStr> ":" <val:ExprOr> => (name, InstanceArg::Concrete(val)),
+    <name:IdentStr> "in" <lo:ExprOr> ".." <hi:ExprOr> =>
+        (name, InstanceArg::Range { lo, hi, inclusive: false }),
+    <name:IdentStr> "in" <lo:ExprOr> "..=" <hi:ExprOr> =>
+        (name, InstanceArg::Range { lo, hi, inclusive: true }),
+};
+
+// ----- Stateful invariants ------------------------------------------------
+
+InvariantInitBlockSingle: (Vec<(String, Expr)>, ForallSpec) = {
+    "init" "{" "}" => (vec![], ForallSpec::default()),
+    "init" "{" <entries:Comma<WithEntry>> "}" => collect_with(entries),
+    "with" "{" "}" => (vec![], ForallSpec::default()),
+    "with" "{" <entries:Comma<WithEntry>> "}" => collect_with(entries),
+};
+
+// `init <inst> { field: value, ... }` -- per-instance init in the system form.
+// Distinguished from the single-entity `init { ... }` by the presence of the
+// instance identifier between `init` and `{`.
+InvariantInitInstance: (String, Vec<(String, Expr)>, ForallSpec) = {
+    "init" <inst:Ident> "{" "}" => (inst.to_string(), vec![], ForallSpec::default()),
+    "init" <inst:Ident> "{" <entries:Comma<WithEntry>> "}" => {
+        let (pins, forall) = collect_with(entries);
+        (inst.to_string(), pins, forall)
+    },
+};
+
+// `for { v: Vault, t: Treasury }` -- the multi-instance header. We embed the
+// instance map in the header itself so no new keyword (e.g. `system` /
+// `instances`) is needed; LR(1) can disambiguate `for {` (system) from
+// `for <Entity>` (single) with one token of lookahead.
+InvariantInstanceDecl: InvariantInstance = {
+    <l:@L> <name:Ident> ":" <entity:Ident> <r:@R> => InvariantInstance {
+        name: name.to_string(), entity: entity.to_string(), init: vec![],
+        forall_state: ForallSpec::default(), init_specified: false,
+        span: Span::new(l, r),
+    },
+};
+
+// `deploy { 0x… }` — invariant setup deployer (distinct from route `deploy Entity(...)`).
+InvariantDeployBlock: Vec<Expr> = {
+    "deploy" "{" <items:Comma<ExprOr>> "}" => items,
+};
+
+InvariantSendersBlock: Vec<Expr> = {
+    "senders" "{" <items:Comma<ExprOr>> "}" => items,
+};
+
+// `ctx { msg::sender: *, sys::now: 100 }` — blockchain/context parameters for
+// the whole invariant trace, mirroring the property-level `ctx { ... }`.
+InvariantCtxBlock: ContextSpec = {
+    "ctx" "{" <entries:Comma<CtxEntry>> "}" => ContextSpec { entries },
+};
+
+// One action rule with an optional `.<route>` suffix to avoid LR(1)
+// conflicts. When the suffix is present we are in the system form (instance =
+// first ident, route = second). Otherwise we are in the single-entity form
+// (instance = "_self", route = first ident).
+InvariantActionDecl: InvariantAction = {
+    <l:@L> "action" <first:Ident> <rest:InvariantActionDot?> "(" <params:ParamList> ")" "{" <body:TestStep*> "}" <r:@R> => {
+        let (instance, route) = match rest {
+            Some(r) => (first.to_string(), r),
+            None => ("_self".to_string(), first.to_string()),
+        };
+        InvariantAction { instance, route, params, body, span: Span::new(l, r) }
+    },
+};
+
+InvariantActionDot: String = {
+    "." <r:Ident> => r.to_string(),
+};
+
+InvariantCheckClause: Expr = {
+    "check" <e:ExprOr> => e,
+};
+
+// `track { let name = expr; ... }` — handler-side state-snapshot
+// bindings. Computed once in the handler constructor and visible as bare
+// identifiers in `check` / `query` / `action` bodies.
+InvariantTrackBinding: InvariantSetupBinding = {
+    <l:@L> "let" <name:IdentStr> "=" <value:ExprOr> <r:@R> => InvariantSetupBinding {
+        name, value, span: Span::new(l, r),
+    },
+};
+
+InvariantTrackBlock: Vec<InvariantSetupBinding> = {
+    "track" "{" <items:InvariantTrackItem*> "}" => items,
+};
+
+InvariantTrackItem: InvariantSetupBinding = {
+    <b:InvariantTrackBinding> ";"? => b,
+};
+
+// `derived name(p: T) -> T { steps; return expr; }` — handler-side
+// view helper. Body steps are restricted to `let`/`assume` (validator
+// I12), followed by a mandatory `return` clause.
+InvariantQueryDecl: InvariantQuery = {
+    <l:@L> "derived" <name:IdentStr> "(" <params:ParamList> ")" "->" <ret:Type>
+    "{" <body:TestStep*> "return" <retval:ExprOr> ";"? "}" <r:@R> => InvariantQuery {
+        name, params, return_type: ret, body, return_value: retval, span: Span::new(l, r),
+    },
+};
+
+// `exclude senders { 0x..., addr2 }` and `exclude selectors { name1, name2 }`.
+InvariantExcludeBlock: InvariantBodyItem = {
+    "exclude" "senders" "{" <items:Comma<ExprOr>> "}" =>
+        InvariantBodyItem::ExcludeSenders(items),
+    "exclude" "selectors" "{" <items:Comma<IdentStr>> "}" =>
+        InvariantBodyItem::ExcludeSelectors(items),
+};
+
+// One arbitrary item inside the invariant body. We accept any order between
+// init / senders / action / check / snapshot / query / exclude so users
+// can write the constructs in the shape that reads best, while validation
+// enforces uniqueness for init and senders. (For the system form,
+// `init <inst> { ... }` clauses replace the flat `init { ... }`.)
+InvariantBodyItem: InvariantBodyItem = {
+    InvariantInitBlockSingle => { let (pins, forall) = <>; InvariantBodyItem::Init(pins, forall) },
+    InvariantInitInstance => { let (i, pins, forall) = <>; InvariantBodyItem::InitInstance(i, pins, forall) },
+    InvariantDeployBlock => InvariantBodyItem::Deploy(<>),
+    InvariantSendersBlock => InvariantBodyItem::Senders(<>),
+    InvariantCtxBlock => InvariantBodyItem::Ctx(<>),
+    InvariantActionDecl => InvariantBodyItem::Action(<>),
+    InvariantCheckClause => InvariantBodyItem::Check(<>),
+    InvariantTrackBlock => InvariantBodyItem::Track(<>),
+    InvariantQueryDecl => InvariantBodyItem::Derived(<>),
+    InvariantExcludeBlock => <>,
+};
+
+// Optional decl-level modifiers (attributes). All are independent of one
+// another and may appear in any order between `invariant "n"` and the
+// body `{`. `#[fail_on_revert]` is parsed inline below for legacy
+// reasons; the rest are applied via `apply_invariant_attrs` after building
+// the decl. Attribute names are parsed as identifiers so they don't
+// clash with route / member names elsewhere in the grammar.
+InvariantAttr: TestAttr = {
+    "#" "[" <n:IdentStr> "(" <s:StrLitVal> ")" "]" => TestAttr::Str(n, s),
+    "#" "[" <n:IdentStr> "(" <i:IntLitVal> ")" "]" =>? Ok(TestAttr::Int(n, crate::ast::int_literal_to_u128(i)?)),
+    "#" "[" <n:IdentStr> "]" => TestAttr::Flag(n),
+};
+
+InvariantDeclRule: InvariantDecl = {
+    // System (multi-entity) form: `invariant "n" [#[attr]]* for { v: Vault, t: Treasury } [#[attr]]* { ... }`
+    // Attributes may appear before `for` and/or before the body brace;
+    // both positions are merged.
+    <l:@L> <prefix:TestAttr*> "invariant" <name:StrLitVal> <pre:InvariantAttr*>
+        "for" "{" <insts:Comma<InvariantInstanceDecl>> "}"
+        <post:InvariantAttr*>
+        "{" <items:InvariantBodyItem*> "}" <r:@R> => {
+        let mut all = prefix;
+        all.extend(pre);
+        all.extend(post);
+        let mut inv = build_invariant_system_with_instances(
+            name, false, insts, items, Span::new(l, r),
+        );
+        apply_invariant_attrs(&mut inv, all);
+        inv
+    },
+    // Single-entity form: `invariant "n" [#[attr]]* for Entity [#[attr]]* { ... }`
+    <l:@L> <prefix:TestAttr*> "invariant" <name:StrLitVal> <pre:InvariantAttr*>
+        "for" <entity:IdentStr>
+        <post:InvariantAttr*>
+        "{" <items:InvariantBodyItem*> "}" <r:@R> => {
+        let mut all = prefix;
+        all.extend(pre);
+        all.extend(post);
+        let mut inv = build_invariant_single(
+            name, entity, false, items, Span::new(l, r),
+        );
+        apply_invariant_attrs(&mut inv, all);
+        inv
+    },
+};
+
+TestFieldAssign: (String, Expr) = {
+    <name:IdentStr> ":" <val:TestFieldValue> => (name, val),
+};
+
+// Lens-enabled field assignment for `expect state { path: value }`
+TestExpectFieldAssign: (FieldPath, Expr) = {
+    <path:TestFieldPath> ":" <val:TestFieldValue> => (path, val),
+};
+
+// Field path with optional chained access: `m_balances[alice].amount`
+TestFieldPath: FieldPath = {
+    <head:IdentStr> <tail:PathTail*> => {
+        let mut path = vec![PathSegment::Field(head)];
+        path.extend(tail);
+        path
+    },
+};
+
+PathTail: PathSegment = {
+    "." <name:IdentStr> => PathSegment::Field(name),
+    "." <idx:IntLitVal> =>? Ok(PathSegment::TupleIndex(crate::ast::int_literal_to_usize(idx)?)),
+    "[" <name:IdentStr> "]" => PathSegment::Index(Expr::Ident(name)),
+    "[" <v:IntLitVal> "]" => PathSegment::Index(Expr::IntLiteral(v)),
+    "[" <h:HexLitVal> "]" => PathSegment::Index(Expr::IntLiteral(h)),
+    "[" <s:StrValue> "]" => PathSegment::Index(Expr::StringLiteral(s)),
+};
+
+TestFieldValue: Expr = {
+    ExprOr,
+    "{" <entries:Comma<TestMapEntry>> "}" => {
+        let pairs: Vec<(String, Expr)> = entries.into_iter().map(|(k, v)| {
+            let key_str = match k {
+                Expr::Ident(s) => s,
+                Expr::IntLiteral(n) => n.to_display_decimal(),
+                other => format!("{:?}", other),
+            };
+            (key_str, v)
+        }).collect();
+        Expr::RecordConstruct("__HashMap".to_string(), pairs)
+    },
+};
+
+TestMapEntry: (Expr, Expr) = {
+    <key:ExprOr> "=>" <val:ExprOr> => (key, val),
+};
+
+TypedLetDeclTy: Type = {
+    ":" <t:Type> => t,
+};
+
+// Boolean `expect` expression. Private copy of the operator ladder so `{`
+// stays out of the follow set (see the `expect <ExpectPredOr>` alternative).
+// `return` is not a primary here: `expect return …` is its own alternative
+// and stores the return value as `Ident("result")`.
+ExpectRelOp: BinOp = {
+    "!=" => BinOp::Ne,
+    "<=" => BinOp::Le,
+    ">=" => BinOp::Ge,
+    "<" => BinOp::Lt,
+    ">" => BinOp::Gt,
+};
+
+// One `&&` tail. The operand stops below `&&` so each suffix is one operand.
+ExpectAndSuffix: Expr = {
+    "&&" <e:ExpectPredBitOr> => e,
+};
+
+// One `||` tail, which may itself contain `&&` (`c && d`).
+ExpectOrSuffix: Expr = {
+    "||" <e:ExpectPredAnd> => e,
+};
+
+ExpectPredOr: Expr = {
+    <l:ExpectPredOr> "||" <r:ExpectPredAnd> => Expr::BinOp(Box::new(l), BinOp::Or, Box::new(r)),
+    ExpectPredAnd,
+};
+
+ExpectPredAnd: Expr = {
+    <l:ExpectPredAnd> "&&" <r:ExpectPredBitOr> => Expr::BinOp(Box::new(l), BinOp::And, Box::new(r)),
+    ExpectPredBitOr,
+};
+
+ExpectPredBitOr: Expr = {
+    <l:ExpectPredBitOr> "|" <r:ExpectPredBitXor> => Expr::BinOp(Box::new(l), BinOp::BitOr, Box::new(r)),
+    ExpectPredBitXor,
+};
+
+ExpectPredBitXor: Expr = {
+    <l:ExpectPredBitXor> "^" <r:ExpectPredBitAnd> => Expr::BinOp(Box::new(l), BinOp::BitXor, Box::new(r)),
+    ExpectPredBitAnd,
+};
+
+ExpectPredBitAnd: Expr = {
+    <l:ExpectPredBitAnd> "&" <r:ExpectPredEq> => Expr::BinOp(Box::new(l), BinOp::BitAnd, Box::new(r)),
+    ExpectPredEq,
+};
+
+ExpectPredEq: Expr = {
+    <l:ExpectPredEq> "==" <r:ExpectPredCmp> => Expr::BinOp(Box::new(l), BinOp::Eq, Box::new(r)),
+    <l:ExpectPredEq> "!=" <r:ExpectPredCmp> => Expr::BinOp(Box::new(l), BinOp::Ne, Box::new(r)),
+    ExpectPredCmp,
+};
+
+ExpectPredCmp: Expr = {
+    <l:ExpectPredCmp> "<" <r:ExpectPredShift> => Expr::BinOp(Box::new(l), BinOp::Lt, Box::new(r)),
+    <l:ExpectPredCmp> ">" <r:ExpectPredShift> => Expr::BinOp(Box::new(l), BinOp::Gt, Box::new(r)),
+    <l:ExpectPredCmp> "<=" <r:ExpectPredShift> => Expr::BinOp(Box::new(l), BinOp::Le, Box::new(r)),
+    <l:ExpectPredCmp> ">=" <r:ExpectPredShift> => Expr::BinOp(Box::new(l), BinOp::Ge, Box::new(r)),
+    ExpectPredShift,
+};
+
+ExpectPredShift: Expr = {
+    <l:ExpectPredShift> "<<" <r:ExpectPredAdd> => Expr::BinOp(Box::new(l), BinOp::Shl, Box::new(r)),
+    <l:ExpectPredShift> ">>" <r:ExpectPredAdd> => Expr::BinOp(Box::new(l), BinOp::Shr, Box::new(r)),
+    ExpectPredAdd,
+};
+
+ExpectPredAdd: Expr = {
+    <l:ExpectPredAdd> "+" <r:ExpectPredMul> => Expr::BinOp(Box::new(l), BinOp::Add, Box::new(r)),
+    <l:ExpectPredAdd> "-" <r:ExpectPredMul> => Expr::BinOp(Box::new(l), BinOp::Sub, Box::new(r)),
+    <l:ExpectPredAdd> "+%" <r:ExpectPredMul> => Expr::BinOp(Box::new(l), BinOp::WrappingAdd, Box::new(r)),
+    <l:ExpectPredAdd> "-%" <r:ExpectPredMul> => Expr::BinOp(Box::new(l), BinOp::WrappingSub, Box::new(r)),
+    ExpectPredMul,
+};
+
+ExpectPredMul: Expr = {
+    <l:ExpectPredMul> "*" <r:ExpectPredCast> => Expr::BinOp(Box::new(l), BinOp::Mul, Box::new(r)),
+    <l:ExpectPredMul> "/" <r:ExpectPredCast> => Expr::BinOp(Box::new(l), BinOp::Div, Box::new(r)),
+    <l:ExpectPredMul> "%" <r:ExpectPredCast> => Expr::BinOp(Box::new(l), BinOp::Mod, Box::new(r)),
+    <l:ExpectPredMul> "*%" <r:ExpectPredCast> => Expr::BinOp(Box::new(l), BinOp::WrappingMul, Box::new(r)),
+    ExpectPredCast,
+};
+
+ExpectPredCast: Expr = {
+    <e:ExpectPredCast> "as" <t:SimpleType> => Expr::Cast(Box::new(e), t),
+    ExpectPredUnary,
+};
+
+ExpectPredUnary: Expr = {
+    "!" <e:ExpectPredUnary> => Expr::UnaryOp(UnaryOp::Not, Box::new(e)),
+    "*" <e:ExpectPredUnary> => Expr::UnaryOp(UnaryOp::Deref, Box::new(e)),
+    "-" <e:ExpectPredUnary> => Expr::UnaryOp(UnaryOp::Neg, Box::new(e)),
+    ExpectPredPostfix,
+};
+
+ExpectPredPostfix: Expr = {
+    <e:ExpectPredPostfix> "." <name:IdentStr> <args:DotCallArgs?> => {
+        match args {
+            Some(a) => Expr::MethodCall(Box::new(e), name, a),
+            None => Expr::FieldAccess(Box::new(e), name),
+        }
+    },
+    <e:ExpectPredPostfix> "." <idx:IntLitVal> =>
+        Expr::FieldAccess(Box::new(e), idx.to_string()),
+    <e:ExpectPredPostfix> "[" <idx:Expr> "]" =>
+        Expr::Index(Box::new(e), Box::new(idx)),
+    ExpectPredPrimary,
+};
+
+ExpectPredPrimary: Expr = {
+    <v:IntLitVal> => Expr::IntLiteral(v),
+    <v:HexLitVal> => Expr::IntLiteral(v),
+    <v:BinLitVal> => Expr::IntLiteral(v),
+    <s:StrValue> => Expr::StringLiteral(s),
+    <b:BytesLitVal> => Expr::BytesLiteral(b),
+    "true" => Expr::BoolLiteral(true),
+    "false" => Expr::BoolLiteral(false),
+    "array" "(" <elems:CommaExprs> ")" => Expr::ArrayLit(elems),
+    "^" <name:IdentStr> => Expr::TemporalRef(name),
+    "@" <name:IdentStr> "(" <args:CommaExprs> ")" => Expr::MacroRef(name, args),
+    "msg::" <field:IdentStr> => Expr::MsgField(field),
+    "sys::" <field:IdentStr> => Expr::SysField(field),
+    "trace::" <name:IdentStr> "(" <route:IdentStr> ")" =>
+        Expr::TraceCall { name, route },
+    "trace::" <field:IdentStr> => Expr::TraceField(field),
+    "{" "}" => Expr::EmptyCollection,
+    "some" "(" <e:Expr> ")" => Expr::Some(Box::new(e)),
+    "none" => Expr::None,
+    <ns:IdentStr> "::" <sub:IdentStr> "::" <fn_name:IdentStr> "(" <args:CommaExprs> ")" =>
+        Expr::NamespacedCall { namespace: format!("{}::{}", ns, sub), name: fn_name, args, type_params: vec![] },
+    <ns:IdentStr> "::" <name:IdentStr> "::" "<" <tps:Comma<Type>> ">" "(" <args:CommaExprs> ")" =>
+        Expr::NamespacedCall { namespace: ns, name, args, type_params: tps },
+    <enum_name:IdentStr> "::" <variant:IdentStr> "(" <args:CommaExprs> ")" =>
+        Expr::EnumVariantWithData(enum_name, variant, args),
+    <enum_name:IdentStr> "::" <variant:IdentStr> => Expr::EnumVariant(enum_name, variant),
+    <name:IdentStr> "(" <args:CommaExprs> ")" => Expr::FnCall(name, args),
+    "(" <first:ExpectPredOr> "," <rest:Comma<ExpectPredOr>> ")" => {
+        let mut v = vec![first];
+        v.extend(rest);
+        Expr::Tuple(v)
+    },
+    "(" <e:ExpectPredOr> ")" => e,
+    "address_of" <entity:IdentStr> "(" <args:CommaExprs> ")" =>
+        Expr::AddressOf { entity_name: entity, args, with_params: vec![] },
+    "cam_encode" "<" <ty:Type> ">" "(" <val:ExprOr> ")" =>
+        Expr::Encode { target_type: ty, value: Box::new(val) },
+    <name:IdentStr> => Expr::Ident(name),
+};
+
+TestStep: TestStep = {
+    <ns:IdentStr> "{" <fields:Comma<TestFieldAssign>> "}" =>
+        TestStep::SetContext { namespace: ns, fields },
+
+    "registry" <entity:IdentStr> "{" <fields:Comma<TestFieldAssign>> "}" => {
+        let mut code_hash = Expr::IntLiteral(cambrian_core::U256::ZERO);
+        let mut code_depth = Expr::IntLiteral(cambrian_core::U256::ZERO);
+        let mut wasm_hash = Expr::IntLiteral(cambrian_core::U256::ZERO);
+        for (name, val) in fields {
+            match name.as_str() {
+                "code_hash" => code_hash = val,
+                "code_depth" => code_depth = val,
+                "wasm_hash" => wasm_hash = val,
+                _ => {}
+            }
+        }
+        TestStep::SetRegistry { entity_name: entity, code_hash, code_depth, wasm_hash }
+    },
+
+    "let" <name:IdentStr> <decl_ty:TypedLetDeclTy?> "=" <value:ExprOr> =>
+        TestStep::Let { name, ty: decl_ty, value },
+
+    "call" <route:IdentStr> "(" <args:CommaExprs> ")" =>
+        TestStep::Call { target: None, route, args },
+
+    // `call peer.route(args)` — drive a contract bound by `deploy`.
+    "call" <target:IdentStr> "." <route:IdentStr> "(" <args:CommaExprs> ")" =>
+        TestStep::Call { target: Some(target), route, args },
+
+    "deploy" <binding:IdentStr> "=" <entity:IdentStr> "(" <args:CommaExprs> ")"
+    "with" "{" <init:Comma<TestFieldAssign>> "}" =>
+        TestStep::DeployPeer { binding, entity, args, init_state: init },
+
+    "deploy" <binding:IdentStr> "=" <entity:IdentStr> "(" <args:CommaExprs> ")" =>
+        TestStep::DeployPeer { binding, entity, args, init_state: vec![] },
+
+    "expect" <_kw:IdentStr> "{" <fields:Comma<TestExpectFieldAssign>> "}" =>
+        TestStep::ExpectState { fields },
+
+    "expect" "throw" <code:IntLitVal> =>?
+        Ok(TestStep::ExpectThrow { code: crate::ast::int_literal_to_u32(code)? }),
+
+    "expect" "emit" <event:IdentStr> "(" <args:CommaExprs> ")" =>
+        TestStep::ExpectEmit { event_name: event, args },
+
+    "expect" "return" "." <idx:IntLitVal> <tail:PathTail*> "==" <value:ExprOr> =>? {
+        let mut path = vec![PathSegment::TupleIndex(crate::ast::int_literal_to_usize(idx)?)];
+        path.extend(tail);
+        Ok(TestStep::ExpectReturnLens { path, value })
+    },
+
+    "expect" "return" "." <path:TestFieldPath> "==" <value:ExprOr> =>
+        TestStep::ExpectReturnLens { path, value },
+
+    "expect" "return" "[" <idx:IntLitVal> "]" <tail:PathTail*> "==" <value:ExprOr> => {
+        let mut path = vec![PathSegment::Index(Expr::IntLiteral(idx))];
+        path.extend(tail);
+        TestStep::ExpectReturnLens { path, value }
+    },
+
+    "expect" "return" "[" <key:IdentStr> "]" <tail:PathTail*> "==" <value:ExprOr> => {
+        let mut path = vec![PathSegment::Index(Expr::Ident(key))];
+        path.extend(tail);
+        TestStep::ExpectReturnLens { path, value }
+    },
+
+    // `expect return == E` is the same equality step as `expect return E`.
+    "expect" "return" "==" <value:ExprOr> => expect_return_eq(value),
+
+    "expect" "return" <op:ExpectRelOp> <rhs:ExpectPredShift> <ands:ExpectAndSuffix*> <ors:ExpectOrSuffix*> =>
+        expect_pred_rel(expect_result_expr(), op, rhs, ands, ors),
+
+    "expect" "return" "." <idx:IntLitVal> <tail:PathTail*> <op:ExpectRelOp> <rhs:ExpectPredShift> <ands:ExpectAndSuffix*> <ors:ExpectOrSuffix*> =>? {
+        let mut path = vec![PathSegment::TupleIndex(crate::ast::int_literal_to_usize(idx)?)];
+        path.extend(tail);
+        Ok(expect_pred_rel(expr_from_field_path(expect_result_expr(), &path), op, rhs, ands, ors))
+    },
+
+    "expect" "return" "." <path:TestFieldPath> <op:ExpectRelOp> <rhs:ExpectPredShift> <ands:ExpectAndSuffix*> <ors:ExpectOrSuffix*> =>
+        expect_pred_rel(expr_from_field_path(expect_result_expr(), &path), op, rhs, ands, ors),
+
+    "expect" "return" "[" <idx:IntLitVal> "]" <tail:PathTail*> <op:ExpectRelOp> <rhs:ExpectPredShift> <ands:ExpectAndSuffix*> <ors:ExpectOrSuffix*> => {
+        let mut path = vec![PathSegment::Index(Expr::IntLiteral(idx))];
+        path.extend(tail);
+        expect_pred_rel(expr_from_field_path(expect_result_expr(), &path), op, rhs, ands, ors)
+    },
+
+    "expect" "return" "[" <key:IdentStr> "]" <tail:PathTail*> <op:ExpectRelOp> <rhs:ExpectPredShift> <ands:ExpectAndSuffix*> <ors:ExpectOrSuffix*> => {
+        let mut path = vec![PathSegment::Index(Expr::Ident(key))];
+        path.extend(tail);
+        expect_pred_rel(expr_from_field_path(expect_result_expr(), &path), op, rhs, ands, ors)
+    },
+
+    "expect" "return" <value:ExprOr> => expect_return_eq(value),
+
+    // Boolean expect. Not `ExprOr`: that nonterminal's FOLLOW includes `{`
+    // (`if cond {`), which would clash with `expect <ident> { … }`.
+    "expect" <cond:ExpectPredOr> => TestStep::ExpectPred { cond },
+
+    "expect" "effects" "[" <elems:TestEffectElementList> "]" =>
+        TestStep::ExpectEffects { elements: elems },
+
+    "assume" <cond:ExprOr> =>
+        TestStep::Assume { cond },
+
+    "bound" <var:IdentStr> "in" <lo:ExprOr> ".." <hi:ExprOr> =>
+        TestStep::Bound { var, lo, hi, inclusive: false },
+
+    "bound" <var:IdentStr> "in" <lo:ExprOr> "..=" <hi:ExprOr> =>
+        TestStep::Bound { var, lo, hi, inclusive: true },
+
+    // `skip if cond;` — early-return inside an invariant action body.
+    // Lowers to `if (!cond) return;` on Foundry handlers (no rejection
+    // counter bump, unlike `assume`).
+    "skip" "if" <cond:ExprOr> =>
+        TestStep::SkipIf { cond },
+
+    // `advanceTime(secs)` — built-in handler action available when the
+    // invariant carries `#[with_time]`. Lowers to `vm.warp + vm.roll`.
+    "advanceTime" "(" <secs:ExprOr> ")" =>
+        TestStep::AdvanceTime { secs },
+};
+
+TestEffectElementList: Vec<TestEffectElement> = {
+    => vec![],
+    TestEffectElementNonEmpty,
+};
+
+TestEffectElementNonEmpty: Vec<TestEffectElement> = {
+    <e:TestEffectElement> => vec![e],
+    <mut list:TestEffectElementNonEmpty> "," <e:TestEffectElement> => { list.push(e); list },
+};
+
+TestEffectElement: TestEffectElement = {
+    ".." => TestEffectElement::Wildcard,
+    <e:TestEffectDecl> => TestEffectElement::Effect(e),
+};
+
+TestEffectDecl: TestEffect = {
+    <name:IdentStr> "(" <args:CommaExprs> ")" "~>" <dest:ExprOr> =>
+        TestEffect::Send { message: Some(name), args, dest, send_options: None },
+    "~>" <dest:ExprOr> =>
+        TestEffect::Send { message: None, args: vec![], dest, send_options: None },
+    <name:IdentStr> "(" <args:CommaExprs> ")" =>
+        TestEffect::PlatformEffect { name, args },
+};
+
+// ===========================================================================
+// Record
+// ===========================================================================
+
+RecordDecl: Record = {
+    <l:@L> "record" <name:IdentStr> "{" <fields:Comma<FieldDecl>> "}" <r:@R> => Record { name, fields, span: Span::new(l, r) },
+};
+
+FieldDecl: Field = {
+    <name:IdentStr> ":" <ty:Type> => Field { name, ty },
+};
+
+// ===========================================================================
+// Enum
+// ===========================================================================
+
+EnumDeclRule: EnumDecl = {
+    <l:@L> "enum" <name:IdentStr> "{" <variants:Comma<EnumVariantDecl>> "}" <r:@R> => EnumDecl { name, variants, span: Span::new(l, r) },
+};
+
+EnumVariantDecl: EnumVariant = {
+    <name:IdentStr> "(" <fields:Comma<Type>> ")" => EnumVariant { name, fields },
+    <name:IdentStr> => EnumVariant { name, fields: vec![] },
+};
+
+// ===========================================================================
+// Type alias
+// ===========================================================================
+
+TypeAliasDecl: TypeAlias = {
+    <l:@L> "type" <name:IdentStr> "=" <ty:Type> <r:@R> => TypeAlias { name, ty, span: Span::new(l, r) },
+};
+
+// ===========================================================================
+// Constant
+// ===========================================================================
+
+ConstDecl: Const = {
+    <l:@L> "const" <name:IdentStr> ":" <ty:Type> "=" <value:ExprOr> <r:@R> => Const { name, ty, value, span: Span::new(l, r) },
+};
+
+// ===========================================================================
+// Macro
+// ===========================================================================
+
+MacroDecl: Macro = {
+    <l:@L> "macro" <name:IdentStr> "(" <params:ParamList> ")" "->" <ret:Type> "=" "{" <body:BlockBody> "}" <r:@R> => Macro {
+        name,
+        params,
+        return_type: ret,
+        body,
+        span: Span::new(l, r),
+    }
+};
+
+// ===========================================================================
+// Routes
+// ===========================================================================
+
+RoutesBlock: Vec<Route> = {
+    "routes" "{" <routes:RouteDecl*> "}" => routes,
+};
+
+RouteDecl: Route = {
+    <attrs:TestAttr*> <r:RouteDeclInner> => finish_route(r, attrs),
+};
+
+RouteDeclInner: Route = {
+    <l:@L> "view" <name:IdentStr> "(" <params:ParamList> ")"
+    <from:FromClauses?>
+    <ret:("->" <Type>)?>
+    <wheres:WhereClauses?>
+    "=>" "[" <body:RouteBodyContent> "]" <r:@R> => Route {
+        name,
+        params,
+        from_clauses: from.unwrap_or_default(),
+        where_clauses: wheres.unwrap_or_default(),
+        return_type: ret,
+        body,
+        is_view: true,
+        is_pure: false,
+        is_init: false,
+        is_accept: false,
+        is_private: false,
+        recover_tag: None,
+        factory_only: false,
+        span: Span::new(l, r),
+    },
+
+    <l:@L> "pure" <name:IdentStr> "(" <params:ParamList> ")"
+    <ret:("->" <Type>)?>
+    "=>" "[" <body:RouteBodyContent> "]" <r:@R> => Route {
+        name,
+        params,
+        from_clauses: vec![],
+        where_clauses: vec![],
+        return_type: ret,
+        body,
+        is_view: false,
+        is_pure: true,
+        is_init: false,
+        is_accept: false,
+        is_private: false,
+        recover_tag: None,
+        factory_only: false,
+        span: Span::new(l, r),
+    },
+
+    <l:@L> "init" <name:IdentStr> "(" <params:ParamList> ")"
+    <wheres:WhereClauses?>
+    "=>" "[" <body:RouteBodyContent> "]" <r:@R> => Route {
+        name,
+        params,
+        from_clauses: vec![],
+        where_clauses: wheres.unwrap_or_default(),
+        return_type: None,
+        body,
+        is_view: false,
+        is_pure: false,
+        is_init: true,
+        is_accept: false,
+        is_private: false,
+        recover_tag: None,
+        factory_only: false,
+        span: Span::new(l, r),
+    },
+
+    <l:@L> "onBounce" <msg:IdentStr> "(" <params:ParamList> ")"
+    "=>" "[" <body:RouteBodyContent> "]" <r:@R> => Route {
+        name: format!("onBounce_{}", msg),
+        params,
+        from_clauses: vec![],
+        where_clauses: vec![],
+        return_type: None,
+        body,
+        is_view: false,
+        is_pure: false,
+        is_init: false,
+        is_accept: false,
+        is_private: false,
+        recover_tag: Some(msg),
+        factory_only: false,
+        span: Span::new(l, r),
+    },
+
+    <l:@L> "recover" <tag:IdentStr> "(" <params:ParamList> ")"
+    "=>" "[" <body:RouteBodyContent> "]" <r:@R> => Route {
+        name: format!("recover_{}", tag),
+        params,
+        from_clauses: vec![],
+        where_clauses: vec![],
+        return_type: None,
+        body,
+        is_view: false,
+        is_pure: false,
+        is_init: false,
+        is_accept: false,
+        is_private: false,
+        recover_tag: Some(tag),
+        factory_only: false,
+        span: Span::new(l, r),
+    },
+
+    <l:@L> "accept" <name:IdentStr> "(" <params:ParamList> ")"
+    <from:FromClauses?>
+    <ret:("->" <Type>)?>
+    <wheres:WhereClauses?>
+    "=>" "[" <body:RouteBodyContent> "]" <r:@R> => Route {
+        name,
+        params,
+        from_clauses: from.unwrap_or_default(),
+        where_clauses: wheres.unwrap_or_default(),
+        return_type: ret,
+        body,
+        is_view: false,
+        is_pure: false,
+        is_init: false,
+        is_accept: true,
+        is_private: false,
+        recover_tag: None,
+        factory_only: false,
+        span: Span::new(l, r),
+    },
+
+    <l:@L> "private" <name:IdentStr> "(" <params:ParamList> ")"
+    <wheres:WhereClauses?>
+    "=>" "[" <body:RouteBodyContent> "]" <r:@R> => Route {
+        name,
+        params,
+        from_clauses: vec![],
+        where_clauses: wheres.unwrap_or_default(),
+        return_type: None,
+        body,
+        is_view: false,
+        is_pure: false,
+        is_init: false,
+        is_accept: false,
+        is_private: true,
+        recover_tag: None,
+        factory_only: false,
+        span: Span::new(l, r),
+    },
+
+    <l:@L> <name:IdentStr> "(" <params:ParamList> ")"
+    <from:FromClauses?>
+    <ret:("->" <Type>)?>
+    <wheres:WhereClauses?>
+    "=>" "[" <body:RouteBodyContent> "]" <r:@R> => Route {
+        name,
+        params,
+        from_clauses: from.unwrap_or_default(),
+        where_clauses: wheres.unwrap_or_default(),
+        return_type: ret,
+        body,
+        is_view: false,
+        is_pure: false,
+        is_init: false,
+        is_accept: false,
+        is_private: false,
+        recover_tag: None,
+        factory_only: false,
+        span: Span::new(l, r),
+    },
+};
+
+FromClauses: Vec<FromClause> = {
+    "from" <FromClauseChain>,
+};
+
+FromClauseChain: Vec<FromClause> = {
+    <first:SingleFromClause> => vec![first],
+    <mut chain:FromClauseChain> "|" <next:SingleFromClause> => {
+        chain.push(next);
+        chain
+    },
+};
+
+// Phase EVM-P0-D: optional throw target for `from` / `where` clauses.
+// Either a numeric `: throw 1` (legacy) or a custom `: throw Foo(args)`.
+ThrowTargetSpec: (Option<u32>, Option<String>, Vec<Expr>) = {
+    ":" "throw" <code:IntLitVal> =>? Ok((Some(crate::ast::int_literal_to_u32(code)?), None, vec![])),
+    ":" "throw" <name:IdentStr> "(" <args:CommaExprs> ")" => (None, Some(name), args),
+    ":" "throw" <name:IdentStr> => (None, Some(name), vec![]),
+};
+
+SingleFromClause: FromClause = {
+    // Entity form: from MyEntity(arg1, arg2) [with {...}] [: throw N | : throw Foo(args)]
+    <entity_name:IdentStr> "(" <args:CommaExprs> ")"
+        <with_params:("with" <SdkParamsLit>)?>
+        <tgt:ThrowTargetSpec?> => {
+            let (code, name, eargs) = tgt.unwrap_or((None, None, vec![]));
+            FromClause {
+                entity_name, args, with_params,
+                kind: FromClauseKind::Entity,
+                error_code: code,
+                error_name: name,
+                error_args: eargs,
+            }
+        },
+
+    // Member form: from m_proposer [: throw N | : throw Foo(args)]
+    <member_name:IdentStr> <tgt:ThrowTargetSpec?> => {
+        let (code, name, eargs) = tgt.unwrap_or((None, None, vec![]));
+        FromClause {
+            entity_name: member_name, args: vec![], with_params: None,
+            kind: FromClauseKind::Member,
+            error_code: code,
+            error_name: name,
+            error_args: eargs,
+        }
+    },
+};
+
+SdkParamsLit: Expr = {
+    RecordLit,
+    "{" <fields:Comma<RecordFieldInit>> "}" => Expr::RecordConstruct(String::new(), fields),
+};
+
+WhereClauses: Vec<WhereClause> = {
+    "where" <WhereClauseChain>,
+    "where" "{" <Comma<SingleWhereClause>> "}",
+};
+
+WhereClauseChain: Vec<WhereClause> = {
+    <c:SingleWhereClause> => vec![c],
+    <c:SingleWhereClause> "&&" <rest:WhereClauseChain> => {
+        let mut v = vec![c];
+        v.extend(rest);
+        v
+    }
+};
+
+SingleWhereClause: WhereClause = {
+    <condition:ExprOr> ":" "throw" <code:IntLitVal> =>? Ok(WhereClause {
+        condition,
+        error_code: crate::ast::int_literal_to_u32(code)?,
+        error_name: None,
+        error_args: vec![],
+    }),
+    <condition:ExprOr> ":" "throw" <name:IdentStr> "(" <args:CommaExprs> ")" => WhereClause {
+        condition,
+        error_code: 0,
+        error_name: Some(name),
+        error_args: args,
+    },
+    <condition:ExprOr> ":" "throw" <name:IdentStr> => WhereClause {
+        condition,
+        error_code: 0,
+        error_name: Some(name),
+        error_args: vec![],
+    },
+};
+
+RouteActionList: Vec<RouteAction> = {
+    RouteAction* => <>,
+};
+
+RouteBodyContent: RouteBody = {
+    <items:RawRouteBodyItem*> => {
+        let has_phases = items.iter().any(|i| matches!(i, RawRouteBodyItem::Phase(_)));
+        let has_actions = items.iter().any(|i| matches!(i, RawRouteBodyItem::Action(_)));
+        if has_phases && has_actions {
+            let mut phases = Vec::new();
+            let mut actions = Vec::new();
+            for item in items {
+                match item {
+                    RawRouteBodyItem::Phase(p) => phases.push(p),
+                    RawRouteBodyItem::Action(a) => actions.push(a),
+                }
+            }
+            RouteBody::Mixed(phases, actions)
+        } else if has_phases {
+            let phases = items.into_iter().map(|i| match i {
+                RawRouteBodyItem::Phase(p) => p,
+                _ => unreachable!(),
+            }).collect();
+            RouteBody::Phased(phases)
+        } else {
+            let actions = items.into_iter().map(|i| match i {
+                RawRouteBodyItem::Action(a) => a,
+                _ => unreachable!(),
+            }).collect();
+            RouteBody::Unphased(actions)
+        }
+    }
+};
+
+RawRouteBodyItem: RawRouteBodyItem = {
+    <a:RouteAction> => RawRouteBodyItem::Action(a),
+    <l:@L> <tag:IdentStr> <wheres:WhereClauses?> ":" "[" <actions:RouteActionList> "]" <r:@R> => RawRouteBodyItem::Phase(PhaseBlock {
+        name: tag.to_string(),
+        where_clauses: wheres.unwrap_or_default(),
+        actions,
+        span: Span::new(l, r),
+    }),
+};
+
+RouteAction: RouteAction = {
+    "let" <pat:Pattern> "=" <val:Expr> ";" => RouteAction::Let {
+        pattern: pat,
+        value: val,
+    },
+    "let" <pat:Pattern> "=" "if" <cond:ExprOr> "{" <then_body:BlockBody> "}"
+    <else_body:("else" "{" <BlockBody> "}")?> ";" => RouteAction::Let {
+        pattern: pat,
+        value: Expr::If(Box::new(cond), Box::new(then_body), else_body.map(|e| Box::new(e))),
+    },
+    "let" <pat:Pattern> "=" "match" <subject:ExprOr> "{" <arms:MatchArmList> "}" ";" => RouteAction::Let {
+        pattern: pat,
+        value: Expr::Match(Box::new(subject), arms),
+    },
+    "let" <pat:Pattern> "=" "{" <val:BlockBody> "}" ";" => RouteAction::Let {
+        pattern: pat,
+        value: val,
+    },
+    "var" <name:IdentStr> "=" <message:IdentStr> "(" <args:CommaExprs> ")" "~>" <dest:Expr> <opts:("with" <SendOptionsExpr>)?> ";"
+        => RouteAction::VarCall { name, message, args, dest, send_options: opts },
+    "return" "(" <vals:CommaExprs> ")" => RouteAction::Return { values: vals },
+    "if" <cond:Expr> "=>" "[" <then_acts:RouteActionList> "]"
+    <else_acts:("else" "[" <RouteActionList> "]")?> => RouteAction::Conditional {
+        condition: cond,
+        then_actions: then_acts,
+        else_actions: else_acts.unwrap_or_default(),
+    },
+    "for" <pat:Pattern> "in" <iter:ExprRange> "=>" "[" <body:RouteActionList> "]" => RouteAction::For {
+        pattern: pat,
+        iter,
+        body,
+    },
+    <message:IdentStr> "(" <args:CommaExprs> ")" "~>" <dest:Expr> <opts:("with" <SendOptionsExpr>)?> => RouteAction::Send {
+        message: Some(message),
+        args,
+        dest,
+        send_options: opts,
+    },
+    "~>" <dest:Expr> <opts:("with" <SendOptionsExpr>)?> => RouteAction::Send {
+        message: None,
+        args: vec![],
+        dest,
+        send_options: opts,
+    },
+    <ns:IdentStr> "::" <name:IdentStr> "(" <args:CommaExprs> ")" <callback:("with" <IdentStr> "(" <CommaExprs> ")")?> => {
+        match callback {
+            Some((cb_route, cb_args)) => {
+                if ns != "gosh" || name != "updateCode" {
+                    panic!("'with callback(...)' syntax is only allowed for 'gosh::updateCode(...)'. Got '{}::{}(...) with ...'", ns, name);
+                }
+                RouteAction::UpdateCode {
+                    update_args: args,
+                    callback_route: cb_route,
+                    callback_args: cb_args,
+                }
+            },
+            None => RouteAction::Effect {
+                namespace: ns,
+                name,
+                args,
+            },
+        }
+    },
+    "deploy" <entity:IdentStr> <ctor_args:("(" <CommaExprs> ")")?> <opts:("with" <SendOptionsExpr>)?> => RouteAction::Deploy {
+        entity,
+        send_options: opts,
+        constructor_args: ctor_args.unwrap_or_default(),
+    },
+    "rescue" <tag:IdentStr> ":" <action:RescuableAction> => RouteAction::Rescue {
+        tag,
+        action: Box::new(action),
+    },
+    "throw" <code:IntLitVal> =>? Ok(RouteAction::Throw {
+        error_code: crate::ast::int_literal_to_u32(code)?,
+    }),
+    "throw" <name:IdentStr> "(" <args:CommaExprs> ")" => RouteAction::ThrowCustom {
+        name,
+        args,
+    },
+    "throw" <name:IdentStr> => RouteAction::ThrowCustom {
+        name,
+        args: vec![],
+    },
+    "emit" <name:IdentStr> "(" <args:CommaExprs> ")" ";" => RouteAction::Emit {
+        event_name: name,
+        args,
+    },
+    "call" <name:IdentStr> "(" <args:CommaExprs> ")" => RouteAction::CallRoute {
+        name,
+        args,
+    },
+};
+
+RescuableAction: RouteAction = {
+    <message:IdentStr> "(" <args:CommaExprs> ")" "~>" <dest:Expr> <opts:("with" <SendOptionsExpr>)?> => RouteAction::Send {
+        message: Some(message),
+        args,
+        dest,
+        send_options: opts,
+    },
+    "~>" <dest:Expr> <opts:("with" <SendOptionsExpr>)?> => RouteAction::Send {
+        message: None,
+        args: vec![],
+        dest,
+        send_options: opts,
+    },
+    "deploy" <entity:IdentStr> <ctor_args:("(" <CommaExprs> ")")?> <opts:("with" <SendOptionsExpr>)?> => RouteAction::Deploy {
+        entity,
+        send_options: opts,
+        constructor_args: ctor_args.unwrap_or_default(),
+    },
+};
+
+// ===========================================================================
+// Member
+// ===========================================================================
+
+MemberDecl: Member = {
+    <l:@L> "identity" <name:IdentStr> ":" <ty:Type> <r:@R> => Member {
+        name,
+        ty,
+        is_identity: true,
+        default_value: None,
+        transforms: vec![],
+        span: Span::new(l, r),
+    },
+    <l:@L> <name:IdentStr> ":" <ty:Type> "=" <default_val:ExprOr> "{" <transforms:MemberTransformDecl*> "}" <r:@R> => Member {
+        name,
+        ty,
+        is_identity: false,
+        default_value: Some(default_val),
+        transforms: transforms.into_iter().flatten().collect(),
+        span: Span::new(l, r),
+    },
+    <l:@L> <name:IdentStr> ":" <ty:Type> "{" <transforms:MemberTransformDecl*> "}" <r:@R> => Member {
+        name,
+        ty,
+        is_identity: false,
+        default_value: None,
+        transforms: transforms.into_iter().flatten().collect(),
+        span: Span::new(l, r),
+    },
+};
+
+PhasedTransformItem: (String, Expr, usize, usize) = {
+    <l:@L> <tag:IdentStr> ":" <body:ExprOr> <r:@R> => (tag.to_string(), body, l, r),
+    <l:@L> <tag:IdentStr> ":" "{" <body:BlockBody> "}" <r:@R> => (tag.to_string(), body, l, r),
+};
+
+MemberTransformDecl: Vec<MemberTransform> = {
+    <l:@L> "in" <route:IdentStr> "(" <params:CommaPatterns> ")" "=>" <body:ExprOr> <r:@R> => vec![MemberTransform {
+        route_name: route,
+        params,
+        body,
+        phase: None,
+        span: Span::new(l, r),
+    }],
+    <l:@L> "in" <route:IdentStr> "(" <params:CommaPatterns> ")" "=>" "{" <body:BlockBody> "}" <r:@R> => vec![MemberTransform {
+        route_name: route,
+        params,
+        body,
+        phase: None,
+        span: Span::new(l, r),
+    }],
+    "in" <route:IdentStr> "(" <params:CommaPatterns> ")" "=>" <items:PhasedTransformItem+> => {
+        items.into_iter().map(|(tag, body, l, r)| MemberTransform {
+            route_name: route.clone(),
+            params: params.clone(),
+            body,
+            phase: Some(tag),
+            span: Span::new(l, r),
+        }).collect()
+    },
+};
+
+// ===========================================================================
+// Types
+// ===========================================================================
+
+pub Type: Type = {
+    SimpleType,
+    GenericType,
+    TupleType,
+};
+
+SimpleType: Type = {
+    <name:IdentStr> => Type::Simple(name),
+};
+
+GenericType: Type = {
+    <name:IdentStr> "<" <params:Comma<Type>> ">" => Type::Generic(name, params),
+    // Nested generics: HashMap<K, HashMap<K2, V2>> where >> is one token
+    <outer:IdentStr> "<" <init:(<Type> ",")*> <inner:IdentStr> "<" <inner_params:Comma<Type>> ">>" => {
+        let inner_type = Type::Generic(inner, inner_params);
+        let mut params = init;
+        params.push(inner_type);
+        Type::Generic(outer, params)
+    },
+};
+
+TupleType: Type = {
+    "(" <elems:Comma2<Type>> ")" => Type::Tuple(elems),
+};
+
+// ===========================================================================
+// Expressions
+//
+// Precedence (low → high):
+//   Or → And → BitOr → BitXor → BitAnd → Eq/Ne → Cmp → Shift → Add → Mul → Cast → Unary → Postfix → Primary
+// ===========================================================================
+
+pub Expr: Expr = {
+    ExprClosure,
+    ExprRange,
+};
+
+ExprRange: Expr = {
+    <l:ExprOr> ".." <r:ExprOr> => Expr::Range(Box::new(l), Box::new(r)),
+    ExprOr,
+};
+
+ExprClosure: Expr = {
+    "|" <params:CommaPatterns> "|" <body:ExprOr> =>
+        Expr::Closure(params, Box::new(body)),
+    "|" <params:CommaPatterns> "|" <r:RecordLit> =>
+        Expr::Closure(params, Box::new(r)),
+    "|" <params:CommaPatterns> "|" "if" <cond:ExprOr> "{" <then_body:BlockBody> "}"
+    <else_body:("else" "{" <BlockBody> "}")?> =>
+        Expr::Closure(params, Box::new(
+            Expr::If(Box::new(cond), Box::new(then_body), else_body.map(|e| Box::new(e)))
+        )),
+    "|" <params:CommaPatterns> "|" "{" <body:BlockBody> "}" =>
+        Expr::Closure(params, Box::new(body)),
+};
+
+// Record construct/update: Name { field: val }
+// Parsed ONLY in specific unambiguous positions (let values, closure bodies,
+// block final expressions) — NOT in general ExprPrimary, to avoid LALR(1)
+// conflict with if-condition + brace.
+RecordLit: Expr = {
+    <name:IdentStr> "{" <fields:Comma<RecordFieldInit>> "}" => {
+        if name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+            Expr::RecordConstruct(name, fields)
+        } else {
+            Expr::RecordUpdate(Box::new(Expr::Ident(name)), fields)
+        }
+    },
+};
+
+ExprOr: Expr = {
+    <l:ExprOr> "||" <r:ExprAnd> => Expr::BinOp(Box::new(l), BinOp::Or, Box::new(r)),
+    ExprAnd,
+};
+
+ExprAnd: Expr = {
+    <l:ExprAnd> "&&" <r:ExprBitOr> => Expr::BinOp(Box::new(l), BinOp::And, Box::new(r)),
+    ExprBitOr,
+};
+
+ExprBitOr: Expr = {
+    <l:ExprBitOr> "|" <r:ExprBitXor> => Expr::BinOp(Box::new(l), BinOp::BitOr, Box::new(r)),
+    ExprBitXor,
+};
+
+ExprBitXor: Expr = {
+    <l:ExprBitXor> "^" <r:ExprBitAnd> => Expr::BinOp(Box::new(l), BinOp::BitXor, Box::new(r)),
+    ExprBitAnd,
+};
+
+ExprBitAnd: Expr = {
+    <l:ExprBitAnd> "&" <r:ExprEq> => Expr::BinOp(Box::new(l), BinOp::BitAnd, Box::new(r)),
+    ExprEq,
+};
+
+ExprEq: Expr = {
+    <l:ExprEq> "==" <r:ExprCmp> => Expr::BinOp(Box::new(l), BinOp::Eq, Box::new(r)),
+    <l:ExprEq> "!=" <r:ExprCmp> => Expr::BinOp(Box::new(l), BinOp::Ne, Box::new(r)),
+    ExprCmp,
+};
+
+ExprCmp: Expr = {
+    <l:ExprCmp> "<" <r:ExprShift> => Expr::BinOp(Box::new(l), BinOp::Lt, Box::new(r)),
+    <l:ExprCmp> ">" <r:ExprShift> => Expr::BinOp(Box::new(l), BinOp::Gt, Box::new(r)),
+    <l:ExprCmp> "<=" <r:ExprShift> => Expr::BinOp(Box::new(l), BinOp::Le, Box::new(r)),
+    <l:ExprCmp> ">=" <r:ExprShift> => Expr::BinOp(Box::new(l), BinOp::Ge, Box::new(r)),
+    ExprShift,
+};
+
+ExprShift: Expr = {
+    <l:ExprShift> "<<" <r:ExprAdd> => Expr::BinOp(Box::new(l), BinOp::Shl, Box::new(r)),
+    <l:ExprShift> ">>" <r:ExprAdd> => Expr::BinOp(Box::new(l), BinOp::Shr, Box::new(r)),
+    ExprAdd,
+};
+
+ExprAdd: Expr = {
+    <l:ExprAdd> "+" <r:ExprMul> => Expr::BinOp(Box::new(l), BinOp::Add, Box::new(r)),
+    <l:ExprAdd> "-" <r:ExprMul> => Expr::BinOp(Box::new(l), BinOp::Sub, Box::new(r)),
+    <l:ExprAdd> "+%" <r:ExprMul> => Expr::BinOp(Box::new(l), BinOp::WrappingAdd, Box::new(r)),
+    <l:ExprAdd> "-%" <r:ExprMul> => Expr::BinOp(Box::new(l), BinOp::WrappingSub, Box::new(r)),
+    ExprMul,
+};
+
+ExprMul: Expr = {
+    <l:ExprMul> "*" <r:ExprCast> => Expr::BinOp(Box::new(l), BinOp::Mul, Box::new(r)),
+    <l:ExprMul> "/" <r:ExprCast> => Expr::BinOp(Box::new(l), BinOp::Div, Box::new(r)),
+    <l:ExprMul> "%" <r:ExprCast> => Expr::BinOp(Box::new(l), BinOp::Mod, Box::new(r)),
+    <l:ExprMul> "*%" <r:ExprCast> => Expr::BinOp(Box::new(l), BinOp::WrappingMul, Box::new(r)),
+    ExprCast,
+};
+
+ExprCast: Expr = {
+    <e:ExprCast> "as" <t:SimpleType> => Expr::Cast(Box::new(e), t),
+    ExprUnary,
+};
+
+ExprUnary: Expr = {
+    "!" <e:ExprUnary> => Expr::UnaryOp(UnaryOp::Not, Box::new(e)),
+    "*" <e:ExprUnary> => Expr::UnaryOp(UnaryOp::Deref, Box::new(e)),
+    "-" <e:ExprUnary> => Expr::UnaryOp(UnaryOp::Neg, Box::new(e)),
+    ExprPostfix,
+};
+
+ExprPostfix: Expr = {
+    // Dot-access with optional args: expr.name or expr.name(args)
+    <e:ExprPostfix> "." <name:IdentStr> <args:DotCallArgs?> => {
+        match args {
+            Some(a) => Expr::MethodCall(Box::new(e), name, a),
+            None => Expr::FieldAccess(Box::new(e), name),
+        }
+    },
+    // Tuple field access: expr.0, expr.1
+    <e:ExprPostfix> "." <idx:IntLitVal> =>
+        Expr::FieldAccess(Box::new(e), idx.to_string()),
+    // Index access: expr[idx]
+    <e:ExprPostfix> "[" <idx:Expr> "]" =>
+        Expr::Index(Box::new(e), Box::new(idx)),
+    ExprPrimary,
+};
+
+DotCallArgs: Vec<Expr> = {
+    "(" <CommaExprs> ")",
+};
+
+ExprPrimary: Expr = {
+    <v:IntLitVal> => Expr::IntLiteral(v),
+    <v:HexLitVal> => Expr::IntLiteral(v),
+    <v:BinLitVal> => Expr::IntLiteral(v),
+    <s:StrValue> => Expr::StringLiteral(s),
+    <b:BytesLitVal> => Expr::BytesLiteral(b),
+    "true" => Expr::BoolLiteral(true),
+    "false" => Expr::BoolLiteral(false),
+
+    // Array literal as function-like: array(1, 2, 3)
+    "array" "(" <elems:CommaExprs> ")" => Expr::ArrayLit(elems),
+
+    // Temporal ref: ^name
+    "^" <name:IdentStr> => Expr::TemporalRef(name),
+
+    // Macro ref: @name(args)
+    "@" <name:IdentStr> "(" <args:CommaExprs> ")" => Expr::MacroRef(name, args),
+
+    // msg::field
+    "msg::" <field:IdentStr> => Expr::MsgField(field),
+
+    // sys::field
+    "sys::" <field:IdentStr> => Expr::SysField(field),
+
+    // trace::call(route) — `trace::count(deposit)`, `trace::lastWas(withdraw)`
+    "trace::" <name:IdentStr> "(" <route:IdentStr> ")" =>
+        Expr::TraceCall { name, route },
+
+    // trace::field — `trace::length`
+    "trace::" <field:IdentStr> => Expr::TraceField(field),
+
+    // Empty collection: {}
+    "{" "}" => Expr::EmptyCollection,
+
+    // some(expr) / none
+    "some" "(" <e:Expr> ")" => Expr::Some(Box::new(e)),
+    "none" => Expr::None,
+
+    // std::module::fn(args) — standard library (see docs/STDLIB.md)
+    <ns:IdentStr> "::" <sub:IdentStr> "::" <fn_name:IdentStr> "(" <args:CommaExprs> ")" =>
+        Expr::NamespacedCall { namespace: format!("{}::{}", ns, sub), name: fn_name, args, type_params: vec![] },
+
+    // SDK namespaced call with type params (turbofish): gosh::decode::<String, address>(cell)
+    <ns:IdentStr> "::" <name:IdentStr> "::" "<" <tps:Comma<Type>> ">" "(" <args:CommaExprs> ")" =>
+        Expr::NamespacedCall { namespace: ns, name, args, type_params: tps },
+
+    // Enum variant with data OR SDK namespaced call: Name::Ident(args)
+    <enum_name:IdentStr> "::" <variant:IdentStr> "(" <args:CommaExprs> ")" =>
+        Expr::EnumVariantWithData(enum_name, variant, args),
+
+    // Enum variant (unit) OR SDK namespaced prop: EnumName::Variant or gosh::code
+    <enum_name:IdentStr> "::" <variant:IdentStr> => Expr::EnumVariant(enum_name, variant),
+
+    // Function call: ident(args)
+    <name:IdentStr> "(" <args:CommaExprs> ")" => Expr::FnCall(name, args),
+
+    // Tuple: (expr, expr, ...)
+    "(" <first:Expr> "," <rest:Comma<Expr>> ")" => {
+        let mut v = vec![first];
+        v.extend(rest);
+        Expr::Tuple(v)
+    },
+
+    // Parenthesized: (expr)
+    "(" <Expr> ")",
+
+    // Test-only: address_of Entity(identity_args...)
+    // Uses _ctx.pubkey for address computation. Set via `msg { pubkey: pk }` before.
+    "address_of" <entity:IdentStr> "(" <args:CommaExprs> ")" =>
+        Expr::AddressOf { entity_name: entity, args, with_params: vec![] },
+
+    // Test-only: cam_encode<Type>(value) — serialize value into CamData
+    "cam_encode" "<" <ty:Type> ">" "(" <val:ExprOr> ")" =>
+        Expr::Encode { target_type: ty, value: Box::new(val) },
+
+    // Identifier (plain)
+    <name:IdentStr> => Expr::Ident(name),
+};
+
+RecordFieldInit: (String, Expr) = {
+    <name:IdentStr> ":" <val:Expr> => (name, val),
+};
+
+SendOptionsExpr: Expr = {
+    RecordLit,
+    "{" <fields:Comma<RecordFieldInit>> "}" => Expr::RecordConstruct(String::new(), fields),
+    ExprOr,
+};
+
+// ===========================================================================
+// Block body: let-chain with final expression
+// ===========================================================================
+
+// Block body inside { ... }. if-expressions and let-bindings live HERE,
+// not in the general Expr chain. This keeps `{` out of Expr's follow set.
+pub BlockBody: Expr = {
+    <e:Expr> => e,
+    RecordLit,
+    "if" <cond:ExprOr> "{" <then_body:BlockBody> "}"
+    <else_body:("else" "{" <BlockBody> "}")?> =>
+        Expr::If(Box::new(cond), Box::new(then_body), else_body.map(|e| Box::new(e))),
+    "match" <subject:ExprOr> "{" <arms:MatchArmList> "}" =>
+        Expr::Match(Box::new(subject), arms),
+    "for" <pat:Pattern> "in" <iter:ExprRange> "{" <body:BlockBody> "}" =>
+        Expr::For(pat, Box::new(iter), Box::new(body)),
+    "{" <inner:BlockBody> "}" => inner,
+    <stmts:LetStmt+> <final_expr:BlockFinalExpr> => {
+        let mut result = final_expr;
+        for (pat, val) in stmts.into_iter().rev() {
+            result = Expr::Let(pat, Box::new(val), Box::new(result));
+        }
+        result
+    },
+};
+
+// Final expression in a block (after let-bindings) — can be Expr, if, or record
+BlockFinalExpr: Expr = {
+    <e:Expr> => e,
+    RecordLit,
+    "if" <cond:ExprOr> "{" <then_body:BlockBody> "}"
+    <else_body:("else" "{" <BlockBody> "}")?> =>
+        Expr::If(Box::new(cond), Box::new(then_body), else_body.map(|e| Box::new(e))),
+    "match" <subject:ExprOr> "{" <arms:MatchArmList> "}" =>
+        Expr::Match(Box::new(subject), arms),
+    "for" <pat:Pattern> "in" <iter:ExprRange> "{" <body:BlockBody> "}" =>
+        Expr::For(pat, Box::new(iter), Box::new(body)),
+    "{" <inner:BlockBody> "}" => inner,
+};
+
+MatchArmList: Vec<MatchArm> = {
+    Comma<MatchArmDecl>,
+};
+
+MatchArmDecl: MatchArm = {
+    <pat:MatchPatternDecl> "=>" <body:Expr> => MatchArm { pattern: pat, body },
+    <pat:MatchPatternDecl> "=>" "{" <body:BlockBody> "}" => MatchArm { pattern: pat, body },
+};
+
+MatchPatternDecl: MatchPattern = {
+    <enum_name:IdentStr> "::" <variant:IdentStr> "(" <bindings:CommaPatterns> ")" =>
+        MatchPattern::EnumVariantWithData(enum_name, variant, bindings),
+    <enum_name:IdentStr> "::" <variant:IdentStr> => MatchPattern::EnumVariant(enum_name, variant),
+    "some" "(" <inner:Pattern> ")" => MatchPattern::Some(inner),
+    "none" => MatchPattern::None,
+    "_" => MatchPattern::Wildcard,
+    <v:IntLitVal> => MatchPattern::IntLiteral(v),
+    "true" => MatchPattern::BoolLiteral(true),
+    "false" => MatchPattern::BoolLiteral(false),
+    <name:IdentStr> => MatchPattern::Ident(name),
+};
+
+LetStmt: (Pattern, Expr) = {
+    "let" <pat:Pattern> "=" <val:Expr> ";" => (pat, val),
+    "let" <pat:Pattern> "=" <val:RecordLit> ";" => (pat, val),
+    "let" <pat:Pattern> "=" "if" <cond:ExprOr> "{" <then_body:BlockBody> "}"
+    <else_body:("else" "{" <BlockBody> "}")?> ";" =>
+        (pat, Expr::If(Box::new(cond), Box::new(then_body), else_body.map(|e| Box::new(e)))),
+    "let" <pat:Pattern> "=" "match" <subject:ExprOr> "{" <arms:MatchArmList> "}" ";" =>
+        (pat, Expr::Match(Box::new(subject), arms)),
+    "let" <pat:Pattern> "=" "{" <val:BlockBody> "}" ";" => (pat, val),
+};
+
+// ===========================================================================
+// Patterns
+// ===========================================================================
+
+pub Pattern: Pattern = {
+    "_" => Pattern::Wildcard,
+    "*" <name:IdentStr> => Pattern::Deref(Box::new(Pattern::Ident(name))),
+    "some" "(" <inner:Pattern> ")" => Pattern::Some(Box::new(inner)),
+    "none" => Pattern::None,
+    "(" <pats:Comma<Pattern>> ")" => {
+        if pats.len() == 1 {
+            pats.into_iter().next().unwrap()
+        } else {
+            Pattern::Tuple(pats)
+        }
+    },
+    <name:IdentStr> => Pattern::Ident(name),
+};
+
+// ===========================================================================
+// Literal helpers
+// ===========================================================================
+
+IntLitVal: cambrian_core::U256 = {
+    <lit:IntLit> =>? Ok(crate::ast::parse_int_literal_u256(lit)?),
+};
+
+HexLitVal: cambrian_core::U256 = {
+    <lit:HexLit> =>? Ok(crate::ast::parse_hex_literal_u256(lit)?),
+};
+
+BinLitVal: cambrian_core::U256 = {
+    <lit:BinLit> =>? Ok(crate::ast::parse_bin_literal_u256(lit)?),
+};
+
+BytesLitVal: Vec<u8> = {
+    BytesLit => crate::ast::parse_bytes_literal(&<>[2..<>.len()-1]),
+};
+
+StrLitVal: String = {
+    StrLit => <>[1..<>.len()-1].to_string(),
+};
+
+// String literal in expression position: escapes decoded like `b"..."`.
+StrValue: String = {
+    StrLit => crate::ast::parse_string_literal(&<>[1..<>.len()-1]),
+};
+
+IdentStr: String = {
+    Ident => <>.to_string(),
+    "check" => "check".to_string(),
+    "action" => "action".to_string(),
+    "senders" => "senders".to_string(),
+};
+
+// ===========================================================================
+// Comma helpers
+// ===========================================================================
+
+Comma<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T> => { v.push(e); v },
+    <v:(<T> ",")+> => v,
+};
+
+Comma2<T>: Vec<T> = {
+    <first:T> "," <rest:Comma<T>> => {
+        let mut v = vec![first];
+        v.extend(rest);
+        v
+    }
+};
+
+CommaExprs: Vec<Expr> = {
+    => vec![],
+    Comma<Expr>,
+};
+
+CommaPatterns: Vec<Pattern> = {
+    => vec![],
+    Comma<Pattern>,
+};

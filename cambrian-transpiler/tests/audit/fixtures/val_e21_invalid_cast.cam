@@ -1,0 +1,15 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-VAL-010: invalid `as <Type>` cast target must trigger validator E21.
+
+entity X {
+    routes {
+        view get() -> u64 => [
+            let s = 0 as String;
+            return(0)
+        ]
+    }
+
+    m_dummy: u64 {}
+}

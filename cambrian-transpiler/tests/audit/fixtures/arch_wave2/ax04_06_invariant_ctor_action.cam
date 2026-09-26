@@ -1,0 +1,26 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-028 / H-AX-04-06: invariant `action constructor()` — EVM handler no-op
+// (entity already deployed in setUp); Lean `step` re-invokes init route.
+
+entity MintProbe {
+    const MINT: u128 = 100
+
+    routes {
+        #[factory_only]
+        constructor() => []
+    }
+
+    m_total: u128 {
+        in constructor() => MINT
+    }
+}
+
+invariant "pinned total stable" for MintProbe {
+    init { m_total: 50 }
+
+    action constructor() { }
+
+    check m_total == 50
+}

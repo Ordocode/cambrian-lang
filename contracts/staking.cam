@@ -1,0 +1,138 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Staking / Delegation contract in Cambrian
+// Exercises: time-based reward calculation, lock periods, compound rewards,
+//            record update, temporal refs, msg::timestamp, pure fn chains
+
+type Amount = U256
+
+pure fn calc_reward(staked: Amount, duration: u64, rate_bps: u64) -> Amount {
+    staked * (duration as Amount) * (rate_bps as Amount) / 10_000
+}
+
+pure fn max_amount(a: Amount, b: Amount) -> Amount {
+    if a >= b { a } else { b }
+}
+
+entity Staking {
+
+    const ERROR_ZERO_AMOUNT: u8 = 1
+    const ERROR_NOT_STAKED: u8 = 2
+    const ERROR_LOCK_ACTIVE: u8 = 3
+    const ERROR_NOT_OWNER: u8 = 4
+    const RATE_BPS: u64 = 500
+    const LOCK_PERIOD: u64 = 86_400
+
+    record StakeInfo {
+        amount: Amount,
+        start_time: u64,
+        last_claim: u64,
+        accumulated_reward: Amount
+    }
+
+    routes {
+        constructor() => []
+
+        stake(amount: Amount)
+            where amount > 0 : throw 1 => []
+
+        unstake(amount: Amount)
+            where m_stakes.exists(msg::sender) : throw 2 &&
+                  amount > 0 : throw 1 => []
+
+        claimRewards()
+            where m_stakes.exists(msg::sender) : throw 2 => [
+                ~> msg::sender
+            ]
+
+        view getStake(staker: address) -> Amount
+            where m_stakes.exists(staker) : throw 2 => [
+            let info = m_stakes[staker];
+            return(info.amount)
+        ]
+
+        view getPendingReward(staker: address) -> Amount
+            where m_stakes.exists(staker) : throw 2 => [
+            let info = m_stakes[staker];
+            let now = msg::timestamp;
+            let duration = now - info.last_claim;
+            let pending = calc_reward(info.amount, duration, 500) + info.accumulated_reward;
+            return(pending)
+        ]
+
+        view getTotalStaked() -> Amount => [
+            return(m_total_staked)
+        ]
+
+        view getStakerCount() -> u64 => [
+            return(m_staker_count)
+        ]
+    }
+
+    m_total_staked: Amount {
+        in constructor() => 0 as Amount
+        in stake(amount) => m_total_staked + amount
+        in unstake(amount) => m_total_staked - amount
+    }
+
+    m_staker_count: u64 {
+        in constructor() => 0
+        in stake(_) => {
+            let sender = msg::sender;
+            if m_stakes.exists(sender) {
+                m_staker_count
+            } else {
+                m_staker_count + 1
+            }
+        }
+    }
+
+    m_stakes: HashMap<address, StakeInfo> {
+        in stake(amount) => {
+            let sender = msg::sender;
+            let now = msg::timestamp;
+            let info = if m_stakes.exists(sender) {
+                let existing = m_stakes[sender];
+                let duration = now - existing.last_claim;
+                let new_reward = calc_reward(existing.amount, duration, 500);
+                existing {
+                    amount: existing.amount + amount,
+                    last_claim: now,
+                    accumulated_reward: existing.accumulated_reward + new_reward
+                }
+            } else {
+                StakeInfo {
+                    amount: amount,
+                    start_time: now,
+                    last_claim: now,
+                    accumulated_reward: 0 as Amount
+                }
+            };
+            m_stakes.update(sender, info)
+        }
+        in unstake(amount) => {
+            let sender = msg::sender;
+            let now = msg::timestamp;
+            let existing = m_stakes[sender];
+            let duration = now - existing.last_claim;
+            let new_reward = calc_reward(existing.amount, duration, 500);
+            let updated = existing {
+                amount: existing.amount - amount,
+                last_claim: now,
+                accumulated_reward: existing.accumulated_reward + new_reward
+            };
+            m_stakes.update(sender, updated)
+        }
+        in claimRewards() => {
+            let sender = msg::sender;
+            let now = msg::timestamp;
+            let existing = m_stakes[sender];
+            let updated = existing {
+                last_claim: now,
+                accumulated_reward: 0 as Amount
+            };
+            m_stakes.update(sender, updated)
+        }
+    }
+}

@@ -1,0 +1,8 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: std-val-004-crypto-lean
+target: lean
+output_dir: build/
+sources:
+  - std_val_004_std_crypto_lean.cam

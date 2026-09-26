@@ -1,0 +1,8 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: lean-h7-audit
+target: lean
+output_dir: build/
+sources:
+  - lean_h7_dynamic_dispatch_balance.cam

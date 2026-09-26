@@ -1,0 +1,91 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// RehearsalToken (RHT) — fixed-supply ERC-20 for platform rehearsal.
+// Authored from ground-truth spec docs/cambrian-spec/RehearsalToken.spec.cam.
+
+pure fn balance_of(balances: HashMap<address, U256>, owner: address) -> U256 {
+    balances[owner]
+}
+
+pure fn allowance_of(allowances: HashMap<U256, U256>,
+                     owner: address, spender: address) -> U256 {
+    allowances[hashOf(owner, spender)]
+}
+
+entity RehearsalToken {
+
+    const INITIAL_SUPPLY: U256 = 1000000000000000000000000
+    const ZERO: address = 0x0000000000000000000000000000000000000000
+
+    routes {
+        #[factory_only]
+        constructor(initial_holder: address) => []
+
+        transfer(to: address, amount: U256)
+            where to != ZERO : throw 201 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 202
+        => []
+
+        approve(spender: address, amount: U256)
+            where spender != ZERO : throw 201
+        => []
+
+        transferFrom(from_addr: address, to: address, amount: U256)
+            where from_addr != ZERO && to != ZERO : throw 201 &&
+                  balance_of(m_balances, from_addr) >= amount : throw 202 &&
+                  allowance_of(m_allowances, from_addr, msg::sender) >= amount : throw 203
+        => []
+
+        view name() -> String => [ return("Rehearsal Token") ]
+        view symbol() -> String => [ return("RHT") ]
+        view decimals() -> u8 => [ return(18) ]
+        view totalSupply() -> U256 => [ return(m_total_supply) ]
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+        view allowance(owner: address, spender: address) -> U256 => [
+            return(allowance_of(m_allowances, owner, spender))
+        ]
+        view owner() -> address => [ return(m_owner) ]
+    }
+
+    m_total_supply: U256 {
+        in constructor(_) => INITIAL_SUPPLY
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(initial_holder) => {
+            {}.insert(initial_holder, INITIAL_SUPPLY)
+        }
+        in transfer(to, amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            let bal_to   = balance_of(m_balances, to);
+            m_balances
+                .update(msg::sender, bal_from - amount)
+                .update(to,          bal_to   + amount)
+        }
+        in transferFrom(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            m_balances
+                .update(from_addr, bal_from - amount)
+                .update(to,        bal_to   + amount)
+        }
+    }
+
+    m_allowances: HashMap<U256, U256> {
+        in approve(spender, amount) => {
+            m_allowances.update(hashOf(msg::sender, spender), amount)
+        }
+        in transferFrom(from_addr, _, amount) => {
+            let key = hashOf(from_addr, msg::sender);
+            let prev = allowance_of(m_allowances, from_addr, msg::sender);
+            m_allowances.update(key, prev - amount)
+        }
+    }
+
+    m_owner: address {
+        in constructor(initial_holder) => initial_holder
+    }
+}

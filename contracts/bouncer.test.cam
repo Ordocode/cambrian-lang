@@ -1,0 +1,82 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Bouncer — recover routes, send effects, view routes
+
+test "sendBounce stores last sent and produces send effect" for Bouncer skip from {
+    let dest = 0x0000000000000000000000000000000000000000000000000000000000001234
+    call sendBounce(dest, 500)
+    expect state { m_last_sent: 500 }
+    expect effects [.., ~> dest, ..]
+}
+
+test "acceptValue accumulates received" for Bouncer {
+    call acceptValue(100)
+    expect state { m_received: 100 }
+
+    call acceptValue(250)
+    expect state { m_received: 350 }
+}
+
+test "recover_bounce_failed increments bounce count" for Bouncer {
+    call recover_bounce_failed(0x00)
+    expect state { m_bounce_count: 1 }
+
+    call recover_bounce_failed(0x00)
+    expect state { m_bounce_count: 2 }
+}
+
+test "recover_cross_failed increments cross count" for Bouncer {
+    call recover_cross_failed(0x00)
+    expect state { m_cross_count: 1 }
+}
+
+test "recover_transfer_failed increments transfer bounce count" for Bouncer {
+    call recover_transfer_failed(0x00)
+    expect state { m_transfer_bounce_count: 1 }
+}
+
+test "recover_deploy_failed increments deploy fail count" for Bouncer {
+    call recover_deploy_failed(0x00)
+    expect state { m_deploy_fail_count: 1 }
+}
+
+test "getBounceCount returns zero initially" for Bouncer {
+    call getBounceCount()
+    expect return 0
+}
+
+test "getBounceCount after two bounces" for Bouncer {
+    call recover_bounce_failed(0x00)
+    call recover_bounce_failed(0x00)
+    call getBounceCount()
+    expect return 2
+}
+
+test "getCrossCount after recovery" for Bouncer {
+    call recover_cross_failed(0x00)
+    call getCrossCount()
+    expect return 1
+}
+
+test "getTransferBounceCount after recovery" for Bouncer {
+    call recover_transfer_failed(0x00)
+    call getTransferBounceCount()
+    expect return 1
+}
+
+test "getDeployFailCount after recovery" for Bouncer {
+    call recover_deploy_failed(0x00)
+    call getDeployFailCount()
+    expect return 1
+}
+
+test "getSent returns zero initially" for Bouncer {
+    call getSent()
+    expect return 0
+}
+
+test "ping does not change bounce count" for Bouncer {
+    call ping(42)
+    expect state { m_bounce_count: 0, m_cross_count: 0 }
+}

@@ -1,0 +1,48 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for identity_pair — Guardian sends pings, Vault counts them
+
+test "Guardian constructor and ping counting" for Guardian with { m_id: 1 } {
+    call constructor()
+    expect state { m_pings_sent: 0 }
+
+    call ping(42)
+    expect state { m_pings_sent: 1 }
+
+    call ping(43)
+    expect state { m_pings_sent: 2 }
+
+    call getPings()
+    expect return 2
+}
+
+test "Vault constructor initializes counter" for Vault skip from with { m_id: 10 } {
+    call constructor()
+    expect state { m_ping_count: 0 }
+}
+
+test "Vault acceptPing increments counter" for Vault skip from with { m_id: 10 } {
+    let pk = 0x0000000000000000000000000000000000000000000000000000000000001234
+
+    call constructor()
+    call acceptPing(pk)
+    expect state { m_ping_count: 1 }
+
+    call acceptPing(pk)
+    expect state { m_ping_count: 2 }
+}
+
+test "Vault getPingCount returns correct value" for Vault skip from with { m_id: 5 } {
+    let pk = 0x0000000000000000000000000000000000000000000000000000000000005678
+
+    call constructor()
+    call getPingCount()
+    expect return 0
+
+    call acceptPing(pk)
+    call acceptPing(pk)
+    call acceptPing(pk)
+    call getPingCount()
+    expect return 3
+}

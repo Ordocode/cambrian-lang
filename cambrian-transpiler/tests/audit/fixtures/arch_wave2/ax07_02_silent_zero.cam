@@ -1,0 +1,52 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-008 / H-AX-07-02: missing HashMap key → silent `0`, then fallible callee;
+// EVM reverts on typed send; Lean total caller may commit via `exceptGetD`.
+
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-008 / H-AX-07-02: missing HashMap key → silent `0`, then fallible callee;
+// EVM reverts total relay; Lean total relay commits `m_steps` via `exceptGetD`.
+
+entity ZeroGate {
+    identity gid: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+
+        gate(v: u64) where (v > 0) : throw 1 => []
+    }
+
+    m_open: u64 {
+        in create() => 1
+    }
+}
+
+entity SilentZeroProbe {
+    identity pid: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+
+        readSlot(k: u64) -> u64 => [
+            return(m_slots[k])
+        ]
+
+        relay(gate_id: u64, v: u64) => [
+            gate(v) ~> ZeroGate.address(gate_id)
+        ]
+    }
+
+    m_slots: HashMap<u64, u64> {
+        in create() => HashMap::new()
+    }
+
+    m_steps: u64 {
+        in create() => 0
+        in relay(gate_id, v) => m_steps + 1
+    }
+}

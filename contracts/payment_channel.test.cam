@@ -1,0 +1,168 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for PaymentChannel — enum state machine, timestamps, nonce validation
+
+test "constructor sets initial state" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+    expect state { m_state: ChannelState::Open, m_nonce: 0 }
+}
+
+test "deposit zero throws" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    call deposit(0)
+    expect throw 6
+}
+
+test "deposit transitions to Funded" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    msg { value: 1000 }
+    call deposit(1000)
+    expect state { m_state: ChannelState::Funded }
+}
+
+test "updateState transitions to Active" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    call updateState(1, 600, 400)
+    expect state { m_state: ChannelState::Active, m_nonce: 1, m_balance_a: 600, m_balance_b: 400 }
+}
+
+test "updateState with stale nonce throws" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    call updateState(1, 500, 500)
+    call updateState(1, 300, 700)
+    expect throw 5
+}
+
+test "challenge transitions to Challenged with deadline" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    msg { sender: party_a, timestamp: 10000 }
+    call challenge(1, 700, 300)
+    expect state { m_state: ChannelState::Challenged, m_nonce: 1, m_challenge_deadline: 13600 }
+}
+
+test "disputeChallenge returns to Active" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    msg { sender: party_a, timestamp: 10000 }
+    call challenge(1, 700, 300)
+    expect state { m_state: ChannelState::Challenged }
+
+    msg { sender: party_b, timestamp: 11000 }
+    call disputeChallenge(2, 500, 500)
+    expect state { m_state: ChannelState::Active, m_nonce: 2, m_balance_a: 500, m_balance_b: 500 }
+}
+
+test "settle before deadline throws" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    msg { sender: party_a, timestamp: 10000 }
+    call challenge(1, 700, 300)
+
+    msg { timestamp: 12000 }
+    call settle()
+    expect throw 4
+}
+
+test "settle after deadline transitions to Settled" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    msg { sender: party_a, timestamp: 10000 }
+    call challenge(1, 700, 300)
+
+    msg { timestamp: 14000 }
+    call settle()
+    expect state { m_state: ChannelState::Settled }
+}
+
+test "close transitions to Closed" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    call close()
+    expect state { m_state: ChannelState::Closed }
+}
+
+test "getChannelState returns state code" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    call getChannelState()
+    expect return 0
+
+    msg { value: 100 }
+    call deposit(100)
+
+    call getChannelState()
+    expect return 1
+}
+
+test "getBalanceA returns zero initially" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    call getBalanceA()
+    expect return 0
+}
+
+test "deposit with msg value transitions to Funded" for PaymentChannel {
+    let party_a = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let party_b = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: party_a }
+    call constructor(party_a, party_b)
+
+    msg { value: 5000 }
+    call deposit(5000)
+    expect state { m_state: ChannelState::Funded, m_total_deposited: 5000 }
+}

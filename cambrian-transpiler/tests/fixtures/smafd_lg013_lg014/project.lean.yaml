@@ -1,0 +1,13 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+# LG-013 / LG-014 — minimal two-entity cross-property fixture
+name: smafd-lg013-lg014
+target: lean
+output_dir: build-lean/
+sources:
+  - cambrian-contracts/Token.cam
+  - cambrian-contracts/Spender.cam
+  - docs/cambrian-spec/Spender.properties.cam
+lean:
+  numerics: nat

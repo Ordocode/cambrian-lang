@@ -1,0 +1,35 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit contract T-VAL-003b-L10: invariant action on a route that contains sends.
+// Pattern from `lean_p3_l10_warns_on_invariants_touching_sending_routes`.
+
+entity Ping {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        bumped(n: u64) -> u64 => [
+            return(m_count + n)
+        ]
+
+        kick(n: u64) => [
+            var bumped_value = bumped(n) ~> Ping.address();
+        ]
+    }
+
+    m_count: u64 {
+        in create() => 1
+        in bumped(n) => m_count + n
+    }
+}
+
+invariant "kick-bounded" for Ping {
+    init { m_count: 0 }
+
+    action kick(n: u64) {
+        bound n in 0..100
+    }
+
+    check m_count <= 1000000
+}

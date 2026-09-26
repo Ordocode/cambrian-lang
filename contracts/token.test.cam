@@ -1,0 +1,146 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Token — ERC20-like fungible token
+
+test "constructor sets metadata and initial supply" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 18, 1000000)
+    expect state { m_decimals: 18 }
+}
+
+test "transfer moves tokens between accounts" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 18, 1000)
+
+    msg { sender: owner }
+    call transfer(bob, 300)
+
+    call totalSupply()
+    expect return 1000
+}
+
+test "transfer zero amount throws" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 18, 1000)
+
+    msg { sender: owner }
+    call transfer(bob, 0)
+    expect throw 5
+}
+
+test "transfer insufficient balance throws" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000002
+
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 18, 100)
+
+    msg { sender: owner }
+    call transfer(bob, 200)
+    expect throw 1
+}
+
+test "mint increases supply (owner only)" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000003
+
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 18, 1000)
+
+    msg { sender: owner }
+    call mint(alice, 500)
+
+    call totalSupply()
+    expect return 1500
+}
+
+test "mint by non-owner throws" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000003
+
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 18, 1000)
+
+    msg { sender: alice }
+    call mint(alice, 500)
+    expect throw 4
+}
+
+test "mint zero amount throws" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 18, 1000)
+
+    msg { sender: owner }
+    call mint(owner, 0)
+    expect throw 5
+}
+
+test "burn decreases supply" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 18, 1000)
+
+    msg { sender: owner }
+    call burn(300)
+
+    call totalSupply()
+    expect return 700
+}
+
+test "burn more than balance throws" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 18, 100)
+
+    msg { sender: owner }
+    call burn(200)
+    expect throw 1
+}
+
+test "burn zero amount throws" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 18, 1000)
+
+    msg { sender: owner }
+    call burn(0)
+    expect throw 5
+}
+
+test "getDecimals returns configured value" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 8, 0)
+
+    call getDecimals()
+    expect return 8
+}
+
+test "totalSupply after mint and burn" for Token {
+    let owner = 0x0000000000000000000000000000000000000000000000000000000000000001
+
+    msg { sender: owner }
+    call constructor(owner, "TestToken", "TT", 18, 500)
+
+    msg { sender: owner }
+    call mint(owner, 200)
+
+    msg { sender: owner }
+    call burn(100)
+
+    call totalSupply()
+    expect return 600
+}

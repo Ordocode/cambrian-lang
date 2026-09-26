@@ -1,0 +1,14 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-CONT-004 / PM-022: unknown `sys::` field must not silently lower via `extra()`.
+
+entity E {
+    routes {
+        bump() => []
+    }
+
+    m_x: u64 {
+        in bump() => sys::gaslimit
+    }
+}

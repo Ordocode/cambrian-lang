@@ -1,0 +1,26 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Guardian: sends a message to a Vault that it owns.
+// Uses AddressOf to compute Vault's address deterministically.
+// Also demonstrates 'from' clause — Vault only accepts messages from its Guardian.
+
+entity Guardian {
+
+    identity m_id: u64
+
+    routes {
+        constructor() => []
+        ping(vault_id: u64) => [
+            acceptPing(sys::pubkey) ~> Vault.address(vault_id)
+        ]
+        getPings() -> u64 => [
+            return(m_pings_sent)
+        ]
+    }
+
+    m_pings_sent: u64 {
+        in constructor() => 0
+        in ping(_) => m_pings_sent + 1
+    }
+}

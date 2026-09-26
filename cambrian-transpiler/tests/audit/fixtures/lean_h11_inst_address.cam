@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis LEAN-H11: `inst.address` must lower to `Pair.address inst`
+// (same CREATE2 helper as `Entity.address(args)` / `sys::address`).
+
+entity Pair {
+    identity token0: address
+    identity token1: address
+
+    routes {
+        #[factory_only]
+        init create() => []
+
+        getAddr() -> address => [
+            return(inst.address)
+        ]
+    }
+
+    m_x: u64 {
+        in create() => 0
+    }
+}

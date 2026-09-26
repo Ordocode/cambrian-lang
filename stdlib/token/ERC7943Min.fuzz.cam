@@ -1,0 +1,327 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Property fuzz for the uRWA permission layer: one claim per P0 of
+// `product/stdlib/bls/erc7943-min.md`, quantified over the addresses the
+// claim is about.
+//
+// Addresses are parameters, not literals. Pinning them writes the aliasing
+// cases out of the test: the sender that is also the recipient, the operator
+// that is also the holder, the blocked address that is also the payer. Each
+// of those is a state a deployed token reaches on its first busy day, and the
+// ERC20 self-transfer defect in this same directory was reachable for months
+// behind three pinned addresses.
+//
+// `zero_address()` is an entity-scope helper and is not in scope in the
+// generated harness, so the zero guard is spelled as a literal.
+
+// ── P0-1, with P0-7 and P0-8: a rejected transfer reverts ───────────────
+//
+// Stated as "blocked implies revert" rather than "the contract calls
+// canTransfer". An implementation may call the check and ignore the answer,
+// which is exactly the bypass an audit looks for, and only the first phrasing
+// makes that a counterexample.
+//
+// Each property below carries P0-7 or P0-8 in its first assertion — a blocked
+// account makes the transfer check reject — and P0-1 in its second. Keeping
+// them in one trace is what ties the two together: a check that rejects while
+// the route succeeds fails here, and so does the reverse.
+
+property "a blocked sender cannot move value"
+        (op: address, holder: address, payee: address, amount: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume op != holder
+    assume amount > 0 && amount <= 1000
+
+    call constructor(op, holder, 1000)
+    msg { sender: op }
+    call setSendBlocked(holder, true)
+
+    call canTransfer(holder, payee, amount)
+    expect return false
+
+    msg { sender: holder }
+    call transfer(payee, amount)
+    expect throw 8
+
+    fuzz { amount in 1..1000 }
+}
+
+property "a blocked recipient cannot be paid"
+        (op: address, holder: address, payee: address, amount: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume op != holder
+    assume amount > 0 && amount <= 1000
+
+    call constructor(op, holder, 1000)
+    msg { sender: op }
+    call setReceiveBlocked(payee, true)
+
+    call canTransfer(holder, payee, amount)
+    expect return false
+
+    msg { sender: holder }
+    call transfer(payee, amount)
+    expect throw 9
+
+    fuzz { amount in 1..1000 }
+}
+
+// ── P0-2 / P0-3: the operator gate ──────────────────────────────────────
+
+property "only the operator seizes"
+        (op: address, stranger: address, holder: address, amount: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume stranger != op
+    assume amount > 0 && amount <= 1000
+
+    call constructor(op, holder, 1000)
+    msg { sender: stranger }
+    call forcedTransfer(holder, op, amount)
+    expect throw 6
+
+    fuzz { amount in 1..1000 }
+}
+
+property "only the operator freezes"
+        (op: address, stranger: address, holder: address, amount: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume stranger != op
+
+    call constructor(op, holder, 1000)
+    msg { sender: stranger }
+    call setFrozenTokens(holder, amount)
+    expect throw 6
+
+    fuzz { amount in 0..1000 }
+}
+
+// ── P0-4: a full freeze stops every standard transfer ───────────────────
+//
+// The quantifier is over the amount as well as the addresses: "each transfer
+// reverts" is the claim, and a single witness amount would let an off-by-one
+// in the comparison through.
+
+property "nothing leaves a fully frozen account"
+        (op: address, holder: address, payee: address, amount: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume op != holder
+    assume amount > 0 && amount <= 1000
+
+    call constructor(op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, 1000)
+
+    msg { sender: holder }
+    call transfer(payee, amount)
+    expect throw 10
+
+    fuzz { amount in 1..1000 }
+}
+
+// ── P0-5 / P0-12 / P0-13: the checks write nothing ──────────────────────
+
+property "reading a check moves no value"
+        (op: address, holder: address, payee: address, amount: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+
+    call constructor(op, holder, 1000)
+    call canSend(holder)
+    call canReceive(payee)
+    call canTransfer(holder, payee, amount)
+    call getFrozenTokens(holder)
+
+    call balanceOf(holder)
+    expect return 1000
+    expect state { m_total_supply: 1000 }
+
+    fuzz { amount in 0..2000 }
+}
+
+// ── P0-6: seizure works where a transfer would not ──────────────────────
+//
+// The converse of P0-1 for the operator's route. Without it, an entity that
+// reverts `forcedTransfer` unconditionally satisfies every permission claim
+// above — refusing everything is always compliant — and the enforcement
+// power the component exists to provide would be absent with no test red.
+
+property "the operator seizes what the checks forbid"
+        (op: address, holder: address, payee: address, amount: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume op != holder
+    assume payee != holder
+    assume amount > 0 && amount <= 1000
+
+    call constructor(op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, 1000)
+    msg { sender: op }
+    call setSendBlocked(holder, true)
+
+    call canTransfer(holder, payee, amount)
+    expect return false
+
+    msg { sender: op }
+    call forcedTransfer(holder, payee, amount)
+
+    call balanceOf(payee)
+    expect return amount
+
+    fuzz { amount in 1..1000 }
+}
+
+// ── P0-9: the amount bound inside the transfer check ────────────────────
+
+property "the transfer check bounds the amount by the unfrozen part"
+        (op: address, holder: address, payee: address, frozen: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume op != holder
+    assume frozen < 1000
+
+    call constructor(op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, frozen)
+
+    call unfrozenTokens(holder)
+    expect return 1000 - frozen
+    call canTransfer(holder, payee, 1000 - frozen)
+    expect return true
+    call canTransfer(holder, payee, 1001 - frozen)
+    expect return false
+
+    fuzz { frozen in 0..999 }
+}
+
+// ── P0-10 / P0-11: burn under the same two constraints ──────────────────
+
+property "a blocked holder cannot burn"
+        (op: address, holder: address, amount: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume op != holder
+    assume amount > 0 && amount <= 1000
+
+    call constructor(op, holder, 1000)
+    msg { sender: op }
+    call setSendBlocked(holder, true)
+
+    msg { sender: holder }
+    call burn(amount)
+    expect throw 8
+
+    fuzz { amount in 1..1000 }
+}
+
+property "a frozen amount cannot be burned"
+        (op: address, holder: address, frozen: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume op != holder
+    assume frozen < 1000
+
+    call constructor(op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, frozen)
+
+    msg { sender: holder }
+    call burn(1001 - frozen)
+    expect throw 10
+
+    fuzz { frozen in 0..999 }
+}
+
+// ── P1-2: the freeze is written absolutely ──────────────────────────────
+//
+// Including above the balance. ERC-7943 requires this, and it is the case a
+// naive `require(amount <= balanceOf(account))` in `setFrozenTokens` breaks —
+// the operator then cannot withhold a sum that has not arrived, which is the
+// ordinary shape of an order naming a quantity rather than a moment.
+
+property "the freeze is stored as written, above the balance too"
+        (op: address, holder: address, frozen: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume op != holder
+
+    call constructor(op, holder, 1000)
+    msg { sender: op }
+    call setFrozenTokens(holder, frozen)
+
+    call getFrozenTokens(holder)
+    expect return frozen
+
+    fuzz { frozen in 0..5000 }
+}
+
+// ── The aliasing cases the pinned-address style writes out ──────────────
+
+property "a self transfer creates nothing"
+        (op: address, holder: address, amount: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume amount > 0 && amount <= 1000
+
+    call constructor(op, holder, 1000)
+    msg { sender: holder }
+    call transfer(holder, amount)
+
+    call balanceOf(holder)
+    expect return 1000
+    expect state { m_total_supply: 1000 }
+
+    fuzz { amount in 1..1000 }
+}
+
+// A seizure that lands back on the account it came from must also be a no-op.
+// `forcedTransfer` reads both balances before it writes either, so the aliased
+// pair is the same defect as the self transfer above, in the one route that
+// skips every check that would otherwise mask it.
+property "a self seizure creates nothing"
+        (op: address, holder: address, amount: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume amount > 0 && amount <= 1000
+
+    call constructor(op, holder, 1000)
+    msg { sender: op }
+    call forcedTransfer(holder, holder, amount)
+
+    call balanceOf(holder)
+    expect return 1000
+    expect state { m_total_supply: 1000 }
+
+    fuzz { amount in 1..1000 }
+}
+
+// The operator is an ordinary holder under the base routes. An entity that
+// exempts its own operator from the account checks would pass every claim
+// above, because none of them ever lets the two roles meet.
+property "the operator is not exempt from a block"
+        (op: address, payee: address, amount: U256) for ERC7943Min {
+    assume op != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume amount > 0 && amount <= 1000
+
+    call constructor(op, op, 1000)
+    msg { sender: op }
+    call setSendBlocked(op, true)
+
+    msg { sender: op }
+    call transfer(payee, amount)
+    expect throw 8
+
+    fuzz { amount in 1..1000 }
+}

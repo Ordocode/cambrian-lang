@@ -1,0 +1,156 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// ERC20-like fungible token in Cambrian
+// Exercises: nested HashMap, arithmetic on map values, multiple where clauses,
+//            view routes with return, pure fns, outgoing messages
+
+pure fn balance_of(balances: HashMap<address, U256>, owner: address) -> U256 {
+    if balances.exists(owner) { balances[owner] } else { 0 }
+}
+
+pure fn get_allowance(inner: HashMap<address, U256>, spender: address) -> U256 {
+    if inner.exists(spender) { inner[spender] } else { 0 }
+}
+
+entity Token {
+
+    const ERROR_INSUFFICIENT_BALANCE: u8 = 1
+    const ERROR_INSUFFICIENT_ALLOWANCE: u8 = 2
+    const ERROR_NOT_OWNER: u8 = 4
+    const ERROR_ZERO_AMOUNT: u8 = 5
+
+    routes {
+        #[factory_only]
+        constructor(owner: address, name: String, symbol: String, decimals: u8, initial_supply: U256) => []
+
+        transfer(to: address, amount: U256)
+            where amount > 0 : throw 5 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 1 => [
+                ~> msg::sender
+            ]
+
+        approve(spender: address, amount: U256) => [
+            ~> msg::sender
+        ]
+
+        transferFrom(sender_addr: address, to: address, amount: U256)
+            where amount > 0 : throw 5 &&
+                  balance_of(m_balances, sender_addr) >= amount : throw 1 => [
+                ~> msg::sender
+            ]
+
+        mint(to: address, amount: U256)
+            where msg::sender == m_owner : throw 4 &&
+                  amount > 0 : throw 5 => [
+                ~> msg::sender
+            ]
+
+        burn(amount: U256)
+            where amount > 0 : throw 5 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 1 => [
+                ~> msg::sender
+            ]
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        view allowance(owner: address, spender: address) -> U256
+            where m_allowances.exists(owner) : throw 1 => [
+            return(get_allowance(m_allowances[owner], spender))
+        ]
+
+        view totalSupply() -> U256 => [
+            return(m_total_supply)
+        ]
+
+        view getName() -> String => [
+            return(m_name)
+        ]
+
+        view getSymbol() -> String => [
+            return(m_symbol)
+        ]
+
+        view getDecimals() -> u8 => [
+            return(m_decimals)
+        ]
+    }
+
+    m_name: String {
+        in constructor(_, name, _, _, _) => name
+    }
+
+    m_symbol: String {
+        in constructor(_, _, symbol, _, _) => symbol
+    }
+
+    m_decimals: u8 {
+        in constructor(_, _, _, decimals, _) => decimals
+    }
+
+    m_owner: address {
+        in constructor(owner, _, _, _, _) => owner
+    }
+
+    m_total_supply: U256 {
+        in constructor(_, _, _, _, initial_supply) => initial_supply
+        in mint(_, amount) => m_total_supply + amount
+        in burn(amount) => m_total_supply - amount
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(owner, _, _, _, initial_supply) => {}.insert(owner, initial_supply)
+        // Both balances are read before either is written, so when payer and
+        // payee are the same address the credit overwrites the debit and the
+        // account gains `amount` out of nothing. A self-transfer moves nothing,
+        // so returning the map untouched is also the right semantics.
+        in transfer(to, amount) => {
+            let sender = msg::sender;
+            let sender_bal = balance_of(m_balances, sender);
+            let to_bal = balance_of(m_balances, to);
+            if to == sender { m_balances } else {
+                m_balances
+                    .update(sender, sender_bal - amount)
+                    .update(to, to_bal + amount)
+            }
+        }
+        in transferFrom(sender_addr, to, amount) => {
+            let from_bal = balance_of(m_balances, sender_addr);
+            let to_bal = balance_of(m_balances, to);
+            if to == sender_addr { m_balances } else {
+                m_balances
+                    .update(sender_addr, from_bal - amount)
+                    .update(to, to_bal + amount)
+            }
+        }
+        in mint(to, amount) => {
+            let to_bal = balance_of(m_balances, to);
+            m_balances.update(to, to_bal + amount)
+        }
+        in burn(amount) => {
+            let sender = msg::sender;
+            let sender_bal = balance_of(m_balances, sender);
+            m_balances.update(sender, sender_bal - amount)
+        }
+    }
+
+    m_allowances: HashMap<address, HashMap<address, U256>> {
+        in approve(spender, amount) => {
+            let sender = msg::sender;
+            let inner = if m_allowances.exists(sender) {
+                m_allowances[sender]
+            } else {
+                {}
+            };
+            m_allowances.update(sender, inner.update(spender, amount))
+        }
+        in transferFrom(sender_addr, _, amount) => {
+            let sender = msg::sender;
+            let inner = m_allowances[sender_addr];
+            let current = inner[sender];
+            m_allowances.update(sender_addr, inner.update(sender, current - amount))
+        }
+    }
+}

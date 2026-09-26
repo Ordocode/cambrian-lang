@@ -1,0 +1,14 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Control: explicit std::crypto::sha256 must not trigger V49.
+
+entity StdCryptoSha256Control {
+    routes {
+        view hash() -> bytes => [
+            return(std::crypto::sha256("data"))
+        ]
+    }
+
+    m_x: u64 {}
+}

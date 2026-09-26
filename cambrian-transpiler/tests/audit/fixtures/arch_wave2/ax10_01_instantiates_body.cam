@@ -1,0 +1,27 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-004 / H-AX-10-01: linked `#[instantiates]` test is pins-only overlay;
+// catalog steps/expects are shared on EVM (desugar) and Lean (property codegen).
+
+entity InstProbe {
+    routes {
+        #[factory_only]
+        constructor() => []
+        bump() => []
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+        in bump() => m_x + 1
+    }
+}
+
+property "BASE bump once" () for InstProbe {
+    call bump()
+    expect state { m_x: 1 }
+}
+
+#[instantiates("BASE bump once")]
+test "CP linked pins only" for InstProbe {
+}

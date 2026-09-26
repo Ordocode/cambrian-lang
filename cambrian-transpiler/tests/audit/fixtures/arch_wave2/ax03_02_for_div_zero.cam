@@ -1,0 +1,29 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-007 / H-AX-03-02: div-by-zero inside `for` body (not direct `return`).
+
+entity ForDivZero {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        foldDiv() -> u64 => [
+            for i in 0..1 => [
+                let q = m_a / m_b;
+                if (q > 999999) => [
+                    throw 1
+                ]
+            ]
+            return(0)
+        ]
+    }
+
+    m_a: u64 {
+        in constructor() => 1
+    }
+
+    m_b: u64 {
+        in constructor() => 0
+    }
+}

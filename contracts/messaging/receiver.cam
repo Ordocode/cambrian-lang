@@ -1,0 +1,16 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity Receiver {
+
+    routes {
+        acceptValue(value: u64) => []
+        getReceived() -> u64 => [
+            return(m_received)
+        ]
+    }
+
+    m_received: u64 {
+        in acceptValue(value) => m_received + value
+    }
+}

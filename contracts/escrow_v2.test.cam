@@ -1,0 +1,121 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for EscrowV2 — exercises enum variants, Option<String>, tuple return, return lenses
+
+test "constructor sets Created state" for EscrowV2 {
+    let buyer  = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000003
+
+    msg { sender: buyer }
+    call constructor(buyer, seller, arbiter, 1000, 9999)
+    expect state { m_state: State::Created, m_resolution: none }
+}
+
+test "fund transitions to Funded" for EscrowV2 {
+    let buyer  = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000003
+
+    msg { sender: buyer }
+    call constructor(buyer, seller, arbiter, 1000, 9999)
+
+    msg { sender: buyer }
+    call fund()
+    expect state { m_state: State::Funded }
+}
+
+test "fund from non-buyer throws" for EscrowV2 {
+    let buyer  = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000003
+
+    msg { sender: buyer }
+    call constructor(buyer, seller, arbiter, 1000, 9999)
+
+    msg { sender: seller }
+    call fund()
+    expect throw 11
+}
+
+test "release sends to seller" for EscrowV2 {
+    let buyer  = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000003
+
+    msg { sender: buyer }
+    call constructor(buyer, seller, arbiter, 1000, 9999)
+
+    msg { sender: buyer }
+    call fund()
+
+    msg { sender: buyer }
+    call release()
+    expect state { m_state: State::Released }
+    expect effects [~> seller, ..]
+}
+
+test "getStatus returns tuple" for EscrowV2 {
+    let buyer  = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000003
+
+    msg { sender: buyer }
+    call constructor(buyer, seller, arbiter, 1000, 9999)
+
+    call getStatus()
+    expect return.0 == 0
+}
+
+test "resolve sets some(resolution)" for EscrowV2 {
+    let buyer  = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000003
+
+    msg { sender: buyer }
+    call constructor(buyer, seller, arbiter, 1000, 9999)
+
+    msg { sender: buyer }
+    call fund()
+
+    msg { sender: buyer }
+    call dispute()
+
+    msg { sender: arbiter }
+    call resolve(60)
+    expect state { m_state: State::Resolved, m_resolution: some("Resolved by arbiter") }
+}
+
+test "claimTimeout after deadline works" for EscrowV2 {
+    let buyer  = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000003
+
+    msg { sender: buyer }
+    call constructor(buyer, seller, arbiter, 1000, 5000)
+
+    msg { sender: buyer }
+    call fund()
+
+    msg { sender: buyer, timestamp: 6000 }
+    call claimTimeout()
+    expect state { m_state: State::Refunded }
+    expect effects [~> buyer, ..]
+}
+
+test "claimTimeout before deadline throws" for EscrowV2 {
+    let buyer  = 0x0000000000000000000000000000000000000000000000000000000000000001
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    let arbiter = 0x0000000000000000000000000000000000000000000000000000000000000003
+
+    msg { sender: buyer }
+    call constructor(buyer, seller, arbiter, 1000, 5000)
+
+    msg { sender: buyer }
+    call fund()
+
+    msg { sender: buyer, timestamp: 4000 }
+    call claimTimeout()
+    expect throw 16
+}

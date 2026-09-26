@@ -1,0 +1,32 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-007 / H-AX-03-03: div-by-zero in a `match` arm (`let` + `return`, not bare route `return(a/b)`).
+
+enum DivMode {
+    Zero,
+    Safe(u64)
+}
+
+entity MatchDivZero {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        pick(mode: DivMode) -> u64 => [
+            let q = match mode {
+                DivMode::Zero => m_a / m_b,
+                DivMode::Safe(v) => v
+            };
+            return(q)
+        ]
+    }
+
+    m_a: u64 {
+        in constructor() => 1
+    }
+
+    m_b: u64 {
+        in constructor() => 0
+    }
+}

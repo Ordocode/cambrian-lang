@@ -1,0 +1,164 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// NFT Collection contract in Cambrian
+// Exercises: ownership mapping, approval, transfer with checks,
+//            metadata records, optional fields, enum status,
+//            per-token state, counting
+
+type TokenId = u64
+
+pure fn is_owner_or_approved(owner: address, approved: address, sender: address) -> bool {
+    sender == owner || sender == approved
+}
+
+entity NftCollection {
+
+    const ERROR_NOT_OWNER: u8 = 1
+    const ERROR_NOT_APPROVED: u8 = 2
+    const ERROR_TOKEN_EXISTS: u8 = 3
+    const ERROR_TOKEN_NOT_FOUND: u8 = 4
+    const ERROR_SELF_TRANSFER: u8 = 5
+    const ERROR_BURNED: u8 = 6
+
+    enum NftStatus {
+        Active,
+        Burned
+    }
+
+    record TokenData {
+        owner: address,
+        approved: address,
+        uri: String,
+        status: NftStatus
+    }
+
+    routes {
+        constructor(name: String, symbol: String) => []
+
+        mint(to: address, token_id: TokenId, uri: String)
+            where msg::sender == m_owner : throw 1 &&
+                  !m_tokens.exists(token_id) : throw 3 => []
+
+        transfer(src: address, to: address, token_id: TokenId)
+            where m_tokens.exists(token_id) : throw 4 &&
+                  src != to : throw 5 => []
+
+        approve(token_id: TokenId, approved: address)
+            where m_tokens.exists(token_id) : throw 4 => []
+
+        setApprovalForAll(operator: address, approved_flag: bool) => []
+
+        burn(token_id: TokenId)
+            where m_tokens.exists(token_id) : throw 4 => []
+
+        view ownerOf(token_id: TokenId) -> address
+            where m_tokens.exists(token_id) : throw 4 => [
+            let data = m_tokens[token_id];
+            return(data.owner)
+        ]
+
+        view balanceOf(owner: address) -> u64 => [
+            let bal = if m_balance_of.exists(owner) { m_balance_of[owner] } else { 0 };
+            return(bal)
+        ]
+
+        view tokenURI(token_id: TokenId) -> String
+            where m_tokens.exists(token_id) : throw 4 => [
+            let data = m_tokens[token_id];
+            return(data.uri)
+        ]
+
+        view totalSupply() -> u64 => [
+            return(m_total_supply)
+        ]
+
+        view getName() -> String => [
+            return(m_name)
+        ]
+
+        view getSymbol() -> String => [
+            return(m_symbol)
+        ]
+    }
+
+    m_name: String {
+        in constructor(name, _) => name
+    }
+
+    m_symbol: String {
+        in constructor(_, symbol) => symbol
+    }
+
+    m_owner: address {
+        in constructor(_, _) => msg::sender
+    }
+
+    m_total_supply: u64 {
+        in constructor(_, _) => 0
+        in mint(_, _, _) => m_total_supply + 1
+        in burn(_) => m_total_supply - 1
+    }
+
+    m_tokens: HashMap<TokenId, TokenData> {
+        in mint(to, token_id, uri) => {
+            let data = TokenData {
+                owner: to,
+                approved: 0x0000000000000000000000000000000000000000,
+                uri: uri,
+                status: NftStatus::Active
+            };
+            m_tokens.insert(token_id, data)
+        }
+        in transfer(_, to, token_id) => {
+            let data = m_tokens[token_id];
+            let updated = data {
+                owner: to,
+                approved: 0x0000000000000000000000000000000000000000
+            };
+            m_tokens.update(token_id, updated)
+        }
+        in approve(token_id, approved) => {
+            let data = m_tokens[token_id];
+            let updated = data { approved: approved };
+            m_tokens.update(token_id, updated)
+        }
+        in burn(token_id) => {
+            let data = m_tokens[token_id];
+            let updated = data { status: NftStatus::Burned };
+            m_tokens.update(token_id, updated)
+        }
+    }
+
+    m_balance_of: HashMap<address, u64> {
+        in mint(to, _, _) => {
+            let current = if m_balance_of.exists(to) { m_balance_of[to] } else { 0 };
+            m_balance_of.update(to, current + 1)
+        }
+        in transfer(src, to, _) => {
+            let from_bal = if m_balance_of.exists(src) { m_balance_of[src] } else { 0 };
+            let to_bal = if m_balance_of.exists(to) { m_balance_of[to] } else { 0 };
+            m_balance_of
+                .update(src, from_bal - 1)
+                .update(to, to_bal + 1)
+        }
+        in burn(token_id) => {
+            let data = m_tokens[token_id];
+            let owner = data.owner;
+            let current = m_balance_of[owner];
+            m_balance_of.update(owner, current - 1)
+        }
+    }
+
+    m_operator_approvals: HashMap<address, HashMap<address, bool>> {
+        in setApprovalForAll(operator, approved_flag) => {
+            let sender = msg::sender;
+            let inner = if m_operator_approvals.exists(sender) {
+                m_operator_approvals[sender]
+            } else {
+                {}
+            };
+            m_operator_approvals.update(sender, inner.update(operator, approved_flag))
+        }
+    }
+}

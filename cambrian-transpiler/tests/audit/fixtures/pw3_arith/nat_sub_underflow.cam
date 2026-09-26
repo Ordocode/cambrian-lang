@@ -1,0 +1,20 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-O-002 INTENDED: u64 `0 - 1` — EVM Panic 0x11; Lean `numerics: nat`
+// saturating `Nat` subtraction (`0 - 1 = 0`) is the simplified proof model.
+
+entity NatSubUnderflow {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        probe() -> u64 => [
+            return(m_x - 1)
+        ]
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+    }
+}

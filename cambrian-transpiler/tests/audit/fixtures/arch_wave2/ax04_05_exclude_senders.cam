@@ -1,0 +1,37 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-027 / H-AX-04-05: `exclude senders { … }` — EVM Foundry `excludeSender`
+// filters fuzz senders; Lean `senders` def keeps excluded addresses (comment only).
+
+entity ExclSenderProbe {
+    const ALLOWED: address = 0x0000000000000000000000000000000000000002
+    const EXCLUDED: address = 0x0000000000000000000000000000000000000001
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        touchExcluded() where msg::sender == EXCLUDED : throw 1 => []
+    }
+
+    m_excluded_hits: u64 {
+        in constructor() => 0
+        in touchExcluded() => m_excluded_hits + 1
+    }
+}
+
+invariant "excluded never hits" for ExclSenderProbe {
+    init { m_excluded_hits: 0 }
+
+    senders {
+        ALLOWED,
+        EXCLUDED
+    }
+
+    exclude senders { EXCLUDED }
+
+    action touchExcluded() { }
+
+    check m_excluded_hits == 0
+}

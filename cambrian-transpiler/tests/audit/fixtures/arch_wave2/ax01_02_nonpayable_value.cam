@@ -1,0 +1,40 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-013 / H-AX-01-02: typed send `{ value }` to callee route that does
+// not read msg::value — EVM interface is non-payable (compile loud); Lean
+// still credits via WorldState.call.
+
+entity NoPayCallee {
+    routes {
+        #[factory_only]
+        init setup() => []
+
+        ping() => []
+    }
+
+    m_hits: u64 {
+        in setup() => 0
+        in ping() => m_hits + 1
+    }
+}
+
+entity ValueSender {
+    routes {
+        #[factory_only]
+        init setup() => []
+
+        send() => [
+            ping() ~> NoPayCallee.address() with { value: 1 }
+        ]
+    }
+
+    m_sent: u64 {
+        in setup() => 0
+        in send() => m_sent + 1
+    }
+}
+
+test "value to nonpayable ping" for ValueSender {
+    call send()
+}

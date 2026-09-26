@@ -1,0 +1,20 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: escrow-two-vaults
+target: evm
+deterministic_addresses: true
+output_dir: build_invariant_multi/
+sources:
+  - escrow_two_vaults.cam
+  - escrow_two_vaults.invariant.cam
+
+invariant:
+  runs: 4
+  depth: 4
+  fail_on_revert: false
+  seed: 1
+  max_local_rejects: 256
+
+revm_tests:
+  enabled: true

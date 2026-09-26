@@ -1,0 +1,30 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity MatchDemo {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        setCode(code: u64) => []
+
+        classify() -> u64 => [
+            return(m_result)
+        ]
+    }
+
+    m_code: u64 {
+        in constructor() => 0
+        in setCode(code) => code
+    }
+
+    m_result: u64 {
+        in classify() => {
+            match m_code {
+                12 => 100,
+                14 => 351,
+                _ => 633
+            }
+        }
+    }
+}

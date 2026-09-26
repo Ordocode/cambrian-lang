@@ -1,0 +1,112 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Unit tests — qa-plan §6.1 minimum (CU-001 … CU-008).
+
+test "init mints full supply to deployer" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    call constructor(deployer)
+    msg { sender: deployer }
+
+    call totalSupply()
+    expect return 1000000000000000000000000
+    call balanceOf(deployer)
+    expect return 1000000000000000000000000
+}
+
+test "constructor metadata decimals" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call decimals()
+    expect return 18
+}
+
+test "transfer happy path" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let amount   = 1000000000000000000
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(bob, amount)
+
+    call balanceOf(deployer)
+    expect return 1000000000000000000000000 - amount
+    call balanceOf(bob)
+    expect return amount
+}
+
+test "transfer guard zero recipient" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(0x0000000000000000000000000000000000000000, 1)
+    expect throw 201
+}
+
+test "transfer guard insufficient balance" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(bob, 1000000000000000000000001)
+    expect throw 202
+}
+
+test "approve sets allowance" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let amount   = 500000000000000000000
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(spender, amount)
+    call allowance(deployer, spender)
+    expect return amount
+}
+
+test "approve guard zero spender" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(0x0000000000000000000000000000000000000000, 1)
+    expect throw 201
+}
+
+test "transferFrom pulls with allowance" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+    let amount   = 1000000000000000000
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(spender, amount)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, amount)
+
+    call balanceOf(carol)
+    expect return amount
+    msg { sender: deployer }
+    call allowance(deployer, spender)
+    expect return 0
+}
+
+test "transferFrom guard insufficient allowance" for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(spender, 1)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, 2)
+    expect throw 203
+}

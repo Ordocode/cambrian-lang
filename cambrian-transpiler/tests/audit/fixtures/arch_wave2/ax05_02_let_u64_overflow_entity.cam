@@ -1,0 +1,17 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-019 / H-AX-05-02: `let sum = a + b` uses InferSolMode::Decl on EVM
+// (checked uint64 add); Lean overflow-wrap keeps total `BitVec` `+`.
+
+entity LetAddProbe {
+    routes {
+        #[factory_only]
+        init setup() => []
+
+        addViaLet(a: u64, b: u64) -> u64 => [
+            let sum = a + b;
+            return(sum)
+        ]
+    }
+}

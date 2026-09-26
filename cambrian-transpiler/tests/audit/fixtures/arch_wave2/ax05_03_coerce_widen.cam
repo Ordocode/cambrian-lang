@@ -1,0 +1,16 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-022 / H-AX-05-03: mixed-width binop inserts widen `Coerce` in IR;
+// `materialize_typed_expr` erases it to AST `Cast`, so IR round-trip loses metadata.
+
+entity CoerceWidenProbe {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        mix(a: u8, b: u64) -> u64 => [
+            return(a + b)
+        ]
+    }
+}

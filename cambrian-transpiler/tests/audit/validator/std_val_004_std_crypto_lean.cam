@@ -1,0 +1,15 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-STD-VAL-004: std::crypto::sha256 on Lean target must trigger L13.
+
+entity StdCryptoLeanProbe {
+    routes {
+        constructor() => []
+        hash() -> u64 => [ return(std::crypto::sha256("x")) ]
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+    }
+}

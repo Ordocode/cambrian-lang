@@ -1,0 +1,30 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity Vault {
+
+    routes {
+        deposit(amount: u64) => []
+        withdraw(amount: u64) => []
+    }
+
+    identity m_vault_id: u64
+
+    m_balance: u64 {
+        in deposit(amount) => m_balance + amount
+        in withdraw(amount) => m_balance - amount
+    }
+}
+
+entity Treasury {
+
+    routes {
+        credit(amount: u64) => []
+        debit(amount: u64) => []
+    }
+
+    m_total: u64 {
+        in credit(amount) => m_total + amount
+        in debit(amount) => m_total - amount
+    }
+}

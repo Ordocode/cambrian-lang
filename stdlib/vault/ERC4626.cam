@@ -1,0 +1,449 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// ERC4626 — tokenised vault, accounting layer.
+//
+// The same route set as `ERC4626Min.cam` over arithmetic that is exact,
+// branch-free and priced against what the vault actually received. Two
+// changes carry the whole document, and both are about being right when the
+// asset does not cooperate:
+//
+//   1. **Virtual amounts.** Every conversion runs against `totalSupply +
+//      virtualShares` and `totalAssets + 1` rather than the raw pair. There
+//     is no empty-vault case, because neither denominator can be zero, and a
+//     donation into the vault is split with holders who do not exist and
+//     cannot redeem — which is what turns the first-holder attack from free
+//     into expensive.
+//   2. **The counted amount.** `deposit` reads the vault's own balance either
+//      side of the pull and issues shares against the difference, not against
+//      the number the caller named. A fee-on-transfer asset delivers less
+//      than it was asked for, and a vault that credits the request issues
+//      shares against assets it never received.
+//
+// Ground truth: `product/stdlib/bls/erc4626.md`. Read §7 — the attack is
+// bounded here, not prevented, and the bound is a price the attacker pays,
+// not a revert they hit.
+//
+// ## What it implements
+//
+//   - ERC-4626: deposit, mint, withdraw, redeem; asset, totalAssets, the four
+//     convert/preview pairs and the four limit routes.
+//   - The share as an ERC-20: transfer, transferFrom, approve, balanceOf,
+//     allowance, totalSupply, name, symbol, decimals.
+//
+// ## Rounding
+//
+// Identical to the minimal vault, and for the same reason: a remainder that
+// resolves toward the caller is value leaving the vault against no share.
+//
+//   deposit / previewDeposit    assets → shares, down
+//   mint    / previewMint       shares → assets, up
+//   withdraw/ previewWithdraw   assets → shares, up
+//   redeem  / previewRedeem     shares → assets, down
+//
+// `convertToShares` and `convertToAssets` both round down.
+//
+// ## Throw codes
+//
+//   1  zero amount (share transfer)
+//   2  insufficient share balance (share transfer)
+//   3  insufficient share allowance (share transferFrom)
+//   7  zero address as a share recipient or approval spender
+//   20 zero address as a vault receiver or owner
+//   21 the owner holds fewer shares than the burn requires
+//   22 the caller is neither the owner nor approved for that many shares
+//   23 the vault holds less than the asset amount requested
+//   24 the asset's transfer answered false
+//   25 the virtual share amount is below the floor
+//   26 the asset delivered less than `mint` had priced
+//
+// 25 and 26 are this entity's, and neither exists on the minimal vault.
+//
+// 25 is the constructor's floor. The virtual share amount is an argument
+// rather than a constant because the right value depends on the decimals of
+// an asset a library cannot know in advance — but an argument with no floor
+// is an argument a deployer sets to one, and at one the attack costs the
+// attacker roughly what it costs the victim. See `min_virtual_shares` in
+// `erc4626-core.cam`.
+//
+// 26 is the counted amount applied to `mint`. `deposit` names an asset amount
+// and can simply issue against whatever arrived; `mint` names a share amount
+// and must issue exactly that many, so a short delivery has no honest
+// resolution inside the call and the call reverts instead. Issuing the full
+// share amount against a short delivery would make every existing holder pay
+// the asset's fee.
+//
+// ## Deviations worth knowing before you deploy this
+//
+//   - **The first-holder attack costs money; it does not revert.** §7 of the
+//     BLS states the bound. A deployer who wants a hard floor buys it with a
+//     seed deposit, not with this contract.
+//   - **The counted amount does not close the elastic case.** A rebasing
+//     asset can move the vault's balance after the second read, and no
+//     measurement inside one transaction fixes that.
+//   - **The outbound side is not counted.** `withdraw` and `redeem` burn
+//     against the amount that leaves the vault, which a fee-on-transfer asset
+//     deducts from the receiver rather than from the vault. The vault's
+//     accounting is therefore exact and the receiver's is not, which is the
+//     right way round: the shortfall is between the receiver and the asset,
+//     and charging it to the share ledger would spread it over holders who
+//     were not party to the call.
+//   - **A dust redemption reverts rather than burning for nothing.** When the
+//     payout rounds to zero the vault still asks the asset to move zero, and
+//     an asset that rejects that (ours does) reverts the call. Branching on a
+//     zero payout would avoid it, at the cost of a branch on a state the
+//     common path never enters — and reverting is the better answer for a
+//     caller whose redemption was worthless anyway.
+//   - **No permit on the share.** EIP-2612 is on the base token, not here.
+//   - **No `supportsInterface`.** ERC-4626 does not require ERC-165.
+
+import "./erc4626-core.cam"
+
+entity ERC4626 {
+
+    // ERC-4626 names both, and an indexer needs them: a vault's deposit
+    // history is not recoverable from the share ledger, because `Transfer`
+    // from the zero address says how many shares appeared and nothing about
+    // what was paid for them. The share token owes the ERC-20 log as well.
+    event Deposit(indexed sender: address, indexed owner: address,
+                  assets: U256, shares: U256);
+    event Withdraw(indexed sender: address, indexed receiver: address,
+                   indexed owner: address, assets: U256, shares: U256);
+    event Transfer(indexed from_addr: address, indexed to: address, value: U256);
+    event Approval(indexed owner: address, indexed spender: address, value: U256);
+
+    // Same reasoning as the minimal vault: the asset participates in the
+    // CREATE2 salt, so the vault's address is computable for a given asset
+    // before it exists, and the typed member is what makes
+    // `balanceOf(sys::address) ~> m_asset` an external call rather than a
+    // read of a plain word.
+    identity m_asset: Address<VaultAsset>
+
+    routes {
+        // The floor is checked here and nowhere else. It cannot be checked
+        // later: by the time a deposit arrives the rate is already set, and a
+        // vault deployed at a virtual amount of one is not fixable, only
+        // abandonable.
+        #[factory_only]
+        constructor(name_: String, symbol_: String, decimals_: u8,
+                    virtual_shares_: U256)
+            where virtual_shares_ >= min_virtual_shares() : throw 25
+        => []
+
+        // ── ERC-4626 writes ─────────────────────────────────────────────
+
+        // Four phases, and each one exists for a reason the three-phase
+        // version of this route on the minimal vault does not have:
+        //
+        //   read   the balance before the pull, which is both the divisor of
+        //          the conversion and the baseline of the count
+        //   pull   the transfer, whose boolean answer is checked next phase
+        //   count  the balance after, so the difference is what arrived
+        //   issue  the guard on the boolean, the commit, and the answer
+        //
+        // The conversion divides by `before`, not by `after`: the shares are
+        // priced at the rate that held when the caller committed, and pricing
+        // against `after` would divide the deposit by a total that already
+        // includes it.
+        deposit(assets: U256, receiver: address) -> U256
+            where receiver != zero_address() : throw 20
+        => [
+            read: [ var before = balanceOf(sys::address) ~> m_asset; ]
+            pull: [ var paid = transferFrom(msg::sender, sys::address, assets) ~> m_asset; ]
+            count: [ var after = balanceOf(sys::address) ~> m_asset; ]
+            price where paid : throw 24 : [
+                let issued = offset_shares_down(after - before, m_total_supply,
+                                                m_virtual_shares, before);
+            ]
+            issue: [
+                emit Transfer(zero_address(), receiver, issued);
+                emit Deposit(msg::sender, receiver, after - before, issued);
+                return(issued)
+            ]
+        ]
+
+        // The trade from the other end. The caller names the shares, the
+        // vault prices them up, and a short delivery is code 26 rather than a
+        // silent charge to everyone else.
+        mint(shares: U256, receiver: address) -> U256
+            where receiver != zero_address() : throw 20
+        => [
+            read: [
+                var before = balanceOf(sys::address) ~> m_asset;
+                let cost = offset_assets_up(shares, m_total_supply,
+                                            m_virtual_shares, before);
+            ]
+            pull: [ var paid = transferFrom(msg::sender, sys::address, cost) ~> m_asset; ]
+            count: [ var after = balanceOf(sys::address) ~> m_asset; ]
+            issue where paid : throw 24 &&
+                        after - before >= cost : throw 26 : [
+                emit Transfer(zero_address(), receiver, shares);
+                emit Deposit(msg::sender, receiver, cost, shares);
+                return(cost)
+            ]
+        ]
+
+        // The burn commits before the asset leaves — member transforms are
+        // written ahead of the phase's actions — so this is
+        // checks-effects-interactions without having to arrange it.
+        withdraw(assets: U256, receiver: address, owner: address) -> U256
+            where receiver != zero_address() : throw 20 &&
+                  owner    != zero_address() : throw 20
+        => [
+            read: [
+                var held = balanceOf(sys::address) ~> m_asset;
+                let burnt = offset_shares_up(assets, m_total_supply,
+                                             m_virtual_shares, held);
+            ]
+            settle where held >= assets : throw 23 &&
+                        balance_of(m_balances, owner) >= burnt : throw 21 &&
+                        share_spend_allowed(m_allowances, owner,
+                                            msg::sender, burnt) : throw 22 : [
+                var sent = transfer(receiver, assets) ~> m_asset;
+            ]
+            done where sent : throw 24 : [
+                emit Transfer(owner, zero_address(), burnt);
+                emit Withdraw(msg::sender, receiver, owner, assets, burnt);
+                return(burnt)
+            ]
+        ]
+
+        redeem(shares: U256, receiver: address, owner: address) -> U256
+            where receiver != zero_address() : throw 20 &&
+                  owner    != zero_address() : throw 20
+        => [
+            read: [
+                var held = balanceOf(sys::address) ~> m_asset;
+                let payout = offset_assets_down(shares, m_total_supply,
+                                                m_virtual_shares, held);
+            ]
+            settle where balance_of(m_balances, owner) >= shares : throw 21 &&
+                        share_spend_allowed(m_allowances, owner,
+                                            msg::sender, shares) : throw 22 &&
+                        held >= payout : throw 23 : [
+                var sent = transfer(receiver, payout) ~> m_asset;
+            ]
+            done where sent : throw 24 : [
+                emit Transfer(owner, zero_address(), shares);
+                emit Withdraw(msg::sender, receiver, owner, payout, shares);
+                return(payout)
+            ]
+        ]
+
+        // ── ERC-4626 reads ──────────────────────────────────────────────
+
+        view asset() -> address => [ return(m_asset) ]
+
+        // The virtual amounts are deliberately not folded into this answer.
+        // `totalAssets` is what the vault holds, which is what a holder can
+        // be paid; the addend belongs to the conversion, not to the balance
+        // sheet, and reporting the sum would misstate both.
+        view totalAssets() -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(held) ]
+        ]
+
+        // P0-12 and P0-13 read out here, so a caller can check the vault's
+        // dilution floor without reading storage.
+        view virtualShares() -> U256 => [ return(m_virtual_shares) ]
+        view virtualAssets() -> U256 => [ return(1) ]
+
+        // The constructor's floor, readable so a deployer can check the
+        // argument they are about to pass and a test can pin the constant
+        // without deploying a vault that reverts.
+        view minVirtualShares() -> U256 => [ return(min_virtual_shares()) ]
+
+        view convertToShares(assets: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(offset_shares_down(assets, m_total_supply,
+                                              m_virtual_shares, held)) ]
+        ]
+
+        view convertToAssets(shares: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(offset_assets_down(shares, m_total_supply,
+                                              m_virtual_shares, held)) ]
+        ]
+
+        // Each `preview` is the same call to the same conversion the matching
+        // write makes, so the two cannot drift. `previewDeposit` answers what
+        // the write returns when the asset delivers in full; against a
+        // fee-charging asset the write answers less, and the standard has no
+        // way to express that — which is exactly why the write counts rather
+        // than trusting this number.
+        view previewDeposit(assets: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(offset_shares_down(assets, m_total_supply,
+                                              m_virtual_shares, held)) ]
+        ]
+
+        view previewMint(shares: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(offset_assets_up(shares, m_total_supply,
+                                            m_virtual_shares, held)) ]
+        ]
+
+        view previewWithdraw(assets: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(offset_shares_up(assets, m_total_supply,
+                                            m_virtual_shares, held)) ]
+        ]
+
+        view previewRedeem(shares: U256) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [ return(offset_assets_down(shares, m_total_supply,
+                                              m_virtual_shares, held)) ]
+        ]
+
+        view maxDeposit(receiver: address) -> U256 => [ return(u256_max()) ]
+        view maxMint(receiver: address) -> U256 => [ return(u256_max()) ]
+
+        view maxWithdraw(owner: address) -> U256 => [
+            read: [ var held = balanceOf(sys::address) ~> m_asset; ]
+            out:  [
+                return(offset_assets_down(balance_of(m_balances, owner),
+                                          m_total_supply, m_virtual_shares, held))
+            ]
+        ]
+
+        view maxRedeem(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        // ── The share, as an ERC-20 ─────────────────────────────────────
+
+        transfer(to: address, amount: U256) -> bool
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 2
+        => [
+            emit Transfer(msg::sender, to, amount);
+            return(true)
+        ]
+
+        transferFrom(from_addr: address, to: address, amount: U256) -> bool
+            where amount > 0 : throw 1 &&
+                  to != zero_address() : throw 7 &&
+                  balance_of(m_balances, from_addr) >= amount : throw 2 &&
+                  allowance_of(m_allowances, from_addr, msg::sender) >= amount : throw 3
+        => [
+            emit Transfer(from_addr, to, amount);
+            return(true)
+        ]
+
+        approve(spender: address, amount: U256) -> bool
+            where spender != zero_address() : throw 7
+        => [
+            emit Approval(msg::sender, spender, amount);
+            return(true)
+        ]
+
+        view name() -> String => [ return(m_name) ]
+        view symbol() -> String => [ return(m_symbol) ]
+        view decimals() -> u8 => [ return(m_decimals) ]
+        view totalSupply() -> U256 => [ return(m_total_supply) ]
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        view allowance(owner: address, spender: address) -> U256 => [
+            return(allowance_of(m_allowances, owner, spender))
+        ]
+    }
+
+    m_name: String { in constructor(name_, _, _, _) => name_ }
+    m_symbol: String { in constructor(_, symbol_, _, _) => symbol_ }
+    m_decimals: u8 { in constructor(_, _, decimals_, _) => decimals_ }
+
+    // Written once and never again. P0-12 is the claim that no route moves
+    // it; the absence of any other clause in this block is the proof.
+    m_virtual_shares: U256 {
+        in constructor(_, _, _, virtual_shares_) => virtual_shares_
+    }
+
+    // Each transform recomputes its conversion rather than reading the `let`
+    // the route bound — a member transform cannot see a route-body binding.
+    // The recomputation is exact, not approximate: transforms in a phase all
+    // read the state as the phase found it, so `m_total_supply` here is the
+    // value the `read:` phase divided by, and `before` / `after` / `held` are
+    // route-scope `var`s the transform can see.
+    m_total_supply: U256 {
+        in deposit(assets, _) => issue: {
+            m_total_supply + offset_shares_down(after - before, m_total_supply,
+                                                m_virtual_shares, before)
+        }
+        in mint(shares, _) => issue: { m_total_supply + shares }
+        in withdraw(assets, _, _) => settle: {
+            m_total_supply - offset_shares_up(assets, m_total_supply,
+                                              m_virtual_shares, held)
+        }
+        in redeem(shares, _, _) => settle: { m_total_supply - shares }
+    }
+
+    m_balances: HashMap<address, U256> {
+        in deposit(assets, receiver) => issue: {
+            let prev = balance_of(m_balances, receiver);
+            m_balances.update(receiver,
+                prev + offset_shares_down(after - before, m_total_supply,
+                                          m_virtual_shares, before))
+        }
+        in mint(shares, receiver) => issue: {
+            let prev = balance_of(m_balances, receiver);
+            m_balances.update(receiver, prev + shares)
+        }
+        in withdraw(assets, _, owner) => settle: {
+            let prev = balance_of(m_balances, owner);
+            m_balances.update(owner,
+                prev - offset_shares_up(assets, m_total_supply,
+                                        m_virtual_shares, held))
+        }
+        in redeem(shares, _, owner) => settle: {
+            let prev = balance_of(m_balances, owner);
+            m_balances.update(owner, prev - shares)
+        }
+        in transfer(to, amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            let bal_to   = balance_of(m_balances, to);
+            if to == msg::sender { m_balances } else {
+                m_balances
+                    .update(msg::sender, bal_from - amount)
+                    .update(to,          bal_to   + amount)
+            }
+        }
+        in transferFrom(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            if to == from_addr { m_balances } else {
+                m_balances
+                    .update(from_addr, bal_from - amount)
+                    .update(to,        bal_to   + amount)
+            }
+        }
+    }
+
+    m_allowances: HashMap<U256, U256> {
+        in approve(spender, amount) => {
+            m_allowances.update(hashOf(msg::sender, spender), amount)
+        }
+        in transferFrom(from_addr, _, amount) => {
+            let key  = hashOf(from_addr, msg::sender);
+            let prev = allowance_of(m_allowances, from_addr, msg::sender);
+            m_allowances.update(key, allowance_after_spend(prev, amount))
+        }
+        in withdraw(assets, _, owner) => settle: {
+            let key   = hashOf(owner, msg::sender);
+            let spend = offset_shares_up(assets, m_total_supply,
+                                         m_virtual_shares, held);
+            m_allowances.update(key,
+                share_allowance_after_burn(m_allowances, owner,
+                                           msg::sender, spend))
+        }
+        in redeem(shares, _, owner) => settle: {
+            let key = hashOf(owner, msg::sender);
+            m_allowances.update(key,
+                share_allowance_after_burn(m_allowances, owner,
+                                           msg::sender, shares))
+        }
+    }
+}

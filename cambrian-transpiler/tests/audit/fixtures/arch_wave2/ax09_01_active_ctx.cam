@@ -1,0 +1,33 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-037 / H-AX-09-01: sequential EVM test codegen must not leak
+// `ACTIVE_CTX.deterministic` from a prior project (PM-028 class).
+
+entity TlsPeer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        receivePing() => []
+    }
+}
+
+entity TlsHost {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        ping(peer_id: u64) => [
+            receivePing() ~> TlsPeer.address(peer_id)
+        ]
+    }
+}
+
+test "peer send effect addr" for TlsHost with { m_id: 1 } {
+    call ping(7)
+    expect effects [~> TlsPeer.address(7), ..]
+}

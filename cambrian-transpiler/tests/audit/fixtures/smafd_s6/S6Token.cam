@@ -1,0 +1,29 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Session A (S6): factory deploy mint — beneficiary is an explicit ctor param (BUG-U4).
+
+pure fn balance_of(balances: HashMap<address, U256>, owner: address) -> U256 {
+    balances[owner]
+}
+
+entity S6Token {
+
+    const SUPPLY: U256 = 1000000000000000000
+    const ZERO: address = 0x0000000000000000000000000000000000000000
+
+    routes {
+        #[factory_only]
+        constructor(recipient: address) where recipient != ZERO : throw 201 => []
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(recipient) => {
+            {}.insert(recipient, SUPPLY)
+        }
+    }
+}

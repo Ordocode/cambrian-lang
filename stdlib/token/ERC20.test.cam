@@ -1,0 +1,290 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Unit tests for the standard-library ERC20.
+//
+// Covers the ERC-20 surface, the metadata views, every throw code, and the
+// two hardening decisions that distinguish this token from the example it
+// grew out of: mint is gated on a minter, and the zero address is rejected
+// as a recipient, a spender or a permit owner.
+//
+// Constructor argument order throughout:
+//   (name, symbol, decimals, minter, initial_holder, initial_supply)
+
+test "constructor mints initial supply to holder" for ERC20 {
+    let holder = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, holder, 1000000)
+    expect state { m_total_supply: 1000000 }
+
+    call balanceOf(holder)
+    expect return 1000000
+    call totalSupply()
+    expect return 1000000
+}
+
+test "constructor records metadata" for ERC20 {
+    let holder = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 6, mint_auth, holder, 0)
+
+    call decimals()
+    expect return 6
+    call minter()
+    expect return mint_auth
+}
+
+test "transfer moves balance" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob    = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+
+    msg { sender: alice }
+    call transfer(bob, 250)
+
+    call balanceOf(alice)
+    expect return 750
+    call balanceOf(bob)
+    expect return 250
+}
+
+test "transfer of zero throws 1" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob    = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    msg { sender: alice }
+    call transfer(bob, 0)
+    expect throw 1
+}
+
+test "transfer over balance throws 2" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob    = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    msg { sender: alice }
+    call transfer(bob, 1001)
+    expect throw 2
+}
+
+// Burning by transfer to the zero address is the classic way a token loses
+// supply without the supply counter noticing. This token rejects it.
+test "transfer to the zero address throws 7" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let zero   = 0x0000000000000000000000000000000000000000000000000000000000000000
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    msg { sender: alice }
+    call transfer(zero, 100)
+    expect throw 7
+}
+
+test "approve records allowance" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob    = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    msg { sender: alice }
+    call approve(bob, 400)
+
+    call allowance(alice, bob)
+    expect return 400
+}
+
+test "approve of the zero address throws 7" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let zero   = 0x0000000000000000000000000000000000000000000000000000000000000000
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    msg { sender: alice }
+    call approve(zero, 400)
+    expect throw 7
+}
+
+test "transferFrom drains allowance and balance" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob    = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+
+    msg { sender: alice }
+    call approve(bob, 400)
+
+    msg { sender: bob }
+    call transferFrom(alice, carol, 250)
+
+    call balanceOf(alice)
+    expect return 750
+    call balanceOf(carol)
+    expect return 250
+    call allowance(alice, bob)
+    expect return 150
+}
+
+test "transferFrom over allowance throws 3" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob    = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+
+    msg { sender: alice }
+    call approve(bob, 100)
+
+    msg { sender: bob }
+    call transferFrom(alice, carol, 500)
+    expect throw 3
+}
+
+test "mint by the minter grows total supply" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob    = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 100)
+    msg { sender: mint_auth }
+    call mint(bob, 200)
+
+    call totalSupply()
+    expect return 300
+    call balanceOf(bob)
+    expect return 200
+}
+
+// The single most consequential difference from the example token, which
+// let anyone mint. Without this test the gate is one deleted guard away
+// from being gone again.
+test "mint by a stranger throws 6" for ERC20 {
+    let alice    = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let stranger = 0x0000000000000000000000000000000000000000000000000000000000000c01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 100)
+    msg { sender: stranger }
+    call mint(bob, 200)
+    expect throw 6
+}
+
+// A zero minter is the documented way to fix the supply forever. Prove it
+// actually does: the holder, who received the whole initial supply, still
+// cannot mint.
+test "a zero minter makes the supply fixed" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let zero  = 0x0000000000000000000000000000000000000000000000000000000000000000
+
+    call constructor("Standard Token", "STD", 18, zero, alice, 100)
+    msg { sender: alice }
+    call mint(bob, 200)
+    expect throw 6
+}
+
+test "burn shrinks total supply" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    msg { sender: alice }
+    call burn(400)
+
+    call totalSupply()
+    expect return 600
+    call balanceOf(alice)
+    expect return 600
+}
+
+// EIP-2612 permit — rejection paths.
+//
+// Producing a valid signature inside a `.test.cam` needs a signing primitive
+// the test syntax does not expose, so the happy path is covered by the
+// Solidity-side fixtures instead. What is asserted here is that every
+// rejection reachable without a signature is reached.
+
+test "permit past its deadline throws 4" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob    = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    call permit(alice, bob, 500, 0, 27, 1, 1)
+    expect throw 4
+}
+
+test "permit with a bogus signature throws 5" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob    = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    // Deadline far in the future; (v, r, s) recovers to address(0) or to some
+    // unrelated address — never alice.
+    call permit(alice, bob, 500, 9999999999, 27, 1, 2)
+    expect throw 5
+}
+
+// ecrecover returns the zero address for a malformed signature. Without the
+// explicit zero-owner guard, a permit naming address(0) as owner would then
+// satisfy `recovered == owner` and mint an allowance out of nothing. This is
+// the test that pins the guard.
+test "permit naming the zero address as owner throws 7" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob    = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let zero   = 0x0000000000000000000000000000000000000000000000000000000000000000
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    call permit(zero, bob, 500, 9999999999, 27, 1, 2)
+    expect throw 7
+}
+
+test "nonces start at zero" for ERC20 {
+    let alice  = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    call nonces(alice)
+    expect return 0
+}
+
+// ERC-20 declares `transfer`, `transferFrom` and `approve` as
+// `returns (bool)`. The earlier revision returned nothing, and nothing in
+// this file noticed: the harness calls a route directly and discards the
+// result unless a test asks for it. A Solidity consumer holding an `IERC20`
+// does not discard it — it decodes, and empty returndata makes the decode
+// revert. So the token passed its own suite and failed from every wallet,
+// router and vault that reached it through the interface.
+//
+// These three assertions are the only thing standing between that state and
+// this one, which is why they assert the value rather than merely calling.
+test "the three ERC-20 routes answer true" for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor("Token", "TKN", 18, alice, alice, 1000)
+
+    msg { sender: alice }
+    call transfer(bob, 100)
+    expect return true
+
+    msg { sender: alice }
+    call approve(bob, 50)
+    expect return true
+
+    msg { sender: bob }
+    call transferFrom(alice, bob, 50)
+    expect return true
+}

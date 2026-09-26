@@ -1,0 +1,30 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-F-002: route action sequence fuzz — inc/reset counter with bounded invariant.
+
+entity SeqCounter {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        inc() => []
+
+        reset() => []
+    }
+
+    m_count: u64 {
+        in create() => 0
+        in inc() => m_count + 1
+        in reset() => 0
+    }
+}
+
+invariant "count bounded" for SeqCounter {
+    init { m_count: 0 }
+
+    action inc() { }
+    action reset() { }
+
+    check m_count < 10000
+}

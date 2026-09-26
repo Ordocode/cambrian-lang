@@ -1,0 +1,390 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// UniswapV2Pair — Cambrian re-expression of the Uniswap V2 core pair
+// contract. **First fixture in the repo with two `identity` members**:
+// `identity m_token0: address; identity m_token1: address`. Every
+// reference to `Pair.address(t0, t1)` lowers to a CREATE2 prediction
+// using the same salt the auto-generated `CambrianFactory` uses to
+// actually deploy the contract.
+//
+// Idiomatic Cambrian features exercised here:
+//   - **2-identity CREATE2** (G-U4 surface).
+//   - **Member-centric reserves**: `m_reserve0` / `m_reserve1` are
+//     updated from the same `bal0` / `bal1` captured in the
+//     `read:` / `callback:` phase, so all of `mint`, `burn`, `swap`
+//     end with `m_reserve0 := bal0; m_reserve1 := bal1`. This is the
+//     exact pattern governor's `castVote` uses with `weight`.
+//   - **Cross-contract `var` capture** of `balanceOf(sys::address)`
+//     off both `m_token0` and `m_token1` (typed
+//     `Address<ERC20>`) — first time used inside a state-writing
+//     route (G-U5 surface).
+//   - **Per-phase `where`** on `swap`'s `check:` phase to enforce the
+//     K-invariant after the flash-callback round trip.
+//   - **Flash-swap calldata threading**: `~> to with { value: 0, data: data }`
+//     in the `callback:` phase (G-T3 fixed; calldata is now passed
+//     through verbatim).
+//   - **`.fold(...)` over a Range** for Babylonian sqrt — used by the
+//     initial-mint LP-share calculation (`sqrt(amount0 * amount1) -
+//     MINIMUM_LIQUIDITY`). See `pure fn sqrt` below.
+//
+// Simplifications vs upstream V2 Core (each tracked in PLAN.md as a
+// `G-Un`):
+//   - The protocol-fee mint on `mint` / `burn` reads `feeTo() ~>
+//     m_factory` synchronously (cross-contract `var` capture), then
+//     conditionally mints LP to that address. The fee is calculated
+//     from `m_k_last` and the new K — same as OZ's `_mintFee`.
+//   - `MINIMUM_LIQUIDITY` is hard-coded to 1000 (matches OZ).
+//
+// G-U2 (RESOLVED): `+%` / `-%` / `*%` actually wrap on EVM (lowered
+// through `_wadd` / `_wsub` / `_wmul` `unchecked` helpers), and the
+// cumulative-price oracle (`m_price0_cumulative_last`,
+// `m_price1_cumulative_last`) is implemented below using `uqdiv` and
+// `+%` against `time_elapsed * uqdiv(reserveOther, reserveSelf)` — the
+// same UQ112x112 formula upstream uses for TWAP feeds.
+
+// ----------------------------------------------------------------------
+// Top-level pure-fn helpers (shared with UniswapV2Factory.cam).
+// All scalar U256, no HashMap params — lower cleanly per `gen_pure_fn`
+// (`evm.rs:2305`). Project mode merges pure_fns from every .cam file in
+// the project, so these declarations are visible everywhere.
+// ----------------------------------------------------------------------
+
+// Phase Library-1: `min` / `max` / `mul_div` live in `shared.cam`, which
+// is auto-discovered via the `import` directive at the top of this file.
+import "./shared.cam"
+
+// UQ112x112 fixed-point division (`(num << 112) / denom`). The shift
+// is intentionally inside `pure fn` rather than open-coded in the
+// member transform because TWAP consumers calibrate against the
+// upstream UQ encoding bit-for-bit — `(reserveOther << 112) / reserveSelf`.
+pure fn uqdiv(num: U256, denom: U256) -> U256 { (num << 112) / denom }
+
+// Per-tick TWAP increment for `price0CumulativeLast` (and symmetric
+// `_delta1`). Returns `time_elapsed * uqdiv(reserveOther, reserveSelf)`
+// guarded by the upstream `reserve != 0` check; the caller folds the
+// result into the cumulative slot with `+%`. Pulled out as a pure fn
+// because Cambrian's `if` is only valid at block-body position, not
+// inside a `+%` chain.
+pure fn twap_delta0(time_elapsed: U256, reserve0: U256, reserve1: U256) -> U256 {
+    if reserve0 == 0 { 0 } else {
+        if reserve1 == 0 { 0 } else { time_elapsed * uqdiv(reserve1, reserve0) }
+    }
+}
+pure fn twap_delta1(time_elapsed: U256, reserve0: U256, reserve1: U256) -> U256 {
+    if reserve0 == 0 { 0 } else {
+        if reserve1 == 0 { 0 } else { time_elapsed * uqdiv(reserve0, reserve1) }
+    }
+}
+
+// Babylonian sqrt — self-stabilising scalar fold. Converges to
+// floor(sqrt(y)) for any U256 y in well under 256 iterations (linear
+// halvings dominate for r >> sqrt(y); the quadratic phase is short).
+// Once `r_next >= r` the body becomes a no-op for the remaining
+// iterations, so 256 is a comfortable upper bound.
+//
+// The function is structured as a single top-level `let` so that the
+// generated Solidity hoists the for-loop into a real statement (the
+// EVM backend's gen_expr_hoisted recognises `let pat = .fold(...) ;
+// body`). All edge-case clamping happens in nested ternaries over
+// `r_final`, which lowers to a single ternary expression.
+//
+// Final correction: if `r_final * r_final > y` we overshot by 1, so
+// return `r_final - 1`. We compare via `r_final > y / r_final`
+// (equivalent under integer division for `r_final > 0`) to avoid
+// overflow at `r_final ~ 2^128`.
+pure fn sqrt(y: U256) -> U256 {
+    let r_final = (0..256).fold(y, |r, _| {
+        if r == 0 { 1 } else {
+            let r_next = (r + y / r) / 2;
+            if r_next >= r { r } else { r_next }
+        }
+    });
+    if y == 0 { 0 } else {
+        if r_final > y / r_final { r_final - 1 } else { r_final }
+    }
+}
+
+// K-invariant adjusted for the 0.30% Uniswap fee. Returns true iff k
+// holds after a swap: `(bal0 - amount0_in * 0.003) * (bal1 - ...) >=
+// reserve0 * reserve1`. We multiply through by 1000 / 1000 = 1_000_000
+// to stay in integer arithmetic; the upstream contract does the same.
+pure fn k_holds(bal0: U256, bal1: U256,
+                reserve0: U256, reserve1: U256,
+                amount0_out: U256, amount1_out: U256) -> bool {
+    let amount0_in = if bal0 > reserve0 - amount0_out
+                     { bal0 - (reserve0 - amount0_out) } else { 0 };
+    let amount1_in = if bal1 > reserve1 - amount1_out
+                     { bal1 - (reserve1 - amount1_out) } else { 0 };
+    let bal0_adj = bal0 * 1000 - amount0_in * 3;
+    let bal1_adj = bal1 * 1000 - amount1_in * 3;
+    bal0_adj * bal1_adj >= reserve0 * reserve1 * 1000000
+}
+
+// ERC20 read helpers used by the LP-share accounting. `balance_of` is
+// duplicated from `ERC20.cam` because pure fns are program-scoped: the
+// first definition wins on duplicate names, and project mode would
+// reject a second `balance_of` declaration.
+pure fn lp_balance(balances: HashMap<address, U256>, owner: address) -> U256 {
+    balances[owner]
+}
+
+entity UniswapV2Pair {
+
+    // Typed, not plain `address`: the `balanceOf(sys::address) ~> m_tokenN`
+    // reads below need the callee's interface to lower into an external
+    // call. With a plain `address` the read has no faithful lowering.
+    identity m_token0: Address<ERC20>
+    identity m_token1: Address<ERC20>
+
+    routes {
+        // The pair constructor takes no business arguments. The
+        // factory enforces `t0 < t1` and the auto-`CambrianFactory`
+        // forwards the two identity addresses to the constructor.
+        #[factory_only]
+        constructor() => []
+
+        // OZ `mint(address to)`. Two phases:
+        //   read:  capture `bal0` / `bal1` off both tokens.
+        //   tally: mint LP shares; reserves := bal0/bal1.
+        // The `tally` phase is gated by `bal0 > m_reserve0 &&
+        // bal1 > m_reserve1` so a no-deposit mint reverts with throw 100
+        // before any state mutates.
+        mint(to: address) => [
+            read: [
+                var bal0 = balanceOf(sys::address) ~> m_token0;
+                var bal1 = balanceOf(sys::address) ~> m_token1;
+            ]
+            tally where bal0 > m_reserve0 && bal1 > m_reserve1 : throw 100 : []
+        ]
+
+        // OZ `burn(address to)`. Two phases:
+        //   read:    capture pre-burn balances.
+        //   payout:  transfer the proportional share back to `to` on
+        //            both tokens; LP burn + reserve update happens in
+        //            member transforms tagged `payout:`. We compute
+        //            post-payout reserves algebraically
+        //            (`bal0 - share0`) rather than re-reading after the
+        //            external sends — equivalent under no-reentrancy
+        //            (LP holders can't re-enter `burn`; tokens are
+        //            external but the K-invariant is not checked here).
+        // All member writes in `payout:` read the pre-update state
+        // (Cambrian writes through scratch locals at end-of-phase), so
+        // `m_balances[sys::address]` and `m_total_supply` referenced
+        // inside the reserve transforms are the pre-burn values — the
+        // standard OZ ordering.
+        burn(to: address) => [
+            read: [
+                var bal0 = balanceOf(sys::address) ~> m_token0;
+                var bal1 = balanceOf(sys::address) ~> m_token1;
+            ]
+            payout where m_balances[sys::address] > 0 : throw 110 : [
+                transfer(to,
+                    mul_div(m_balances[sys::address], bal0, m_total_supply))
+                    ~> m_token0
+                transfer(to,
+                    mul_div(m_balances[sys::address], bal1, m_total_supply))
+                    ~> m_token1
+            ]
+        ]
+
+        // OZ `swap(uint a0Out, uint a1Out, address to, bytes data)`:
+        //   1. optimistic transfer.
+        //   2. flash callback if `data.length > 0`. G-T3 is fixed so
+        //      `data:` threads through `~> to with { ... }` verbatim.
+        //   3. read post-callback balances.
+        //   4. K-invariant gate (per-phase `where` on `check:`).
+        // Three phases (swap is the deepest phased route in the repo
+        // — G-U6 surface).
+        swap(amount0_out: U256, amount1_out: U256, to: address, data: CamData)
+            where amount0_out > 0 || amount1_out > 0 : throw 200 &&
+                  amount0_out  < m_reserve0          : throw 201 &&
+                  amount1_out  < m_reserve1          : throw 202
+        => [
+            optimistic: [
+                transfer(to, amount0_out) ~> m_token0
+                transfer(to, amount1_out) ~> m_token1
+            ]
+            callback: [
+                ~> to with { value: 0, data: data }
+                var bal0 = balanceOf(sys::address) ~> m_token0;
+                var bal1 = balanceOf(sys::address) ~> m_token1;
+            ]
+            check where k_holds(bal0, bal1, m_reserve0, m_reserve1,
+                                amount0_out, amount1_out) : throw 203 : []
+        ]
+
+        // Force-update reserves to actual balances (catches direct
+        // token transfers that bypassed `mint`). Single-phase; the
+        // member transforms read fresh balances off the tokens.
+        sync() => [
+            read: [
+                var bal0 = balanceOf(sys::address) ~> m_token0;
+                var bal1 = balanceOf(sys::address) ~> m_token1;
+            ]
+            commit: []
+        ]
+
+        // Force-balances back into spec by sweeping the surplus to
+        // `to`. Used to reclaim accidentally-deposited tokens. OZ
+        // `skim(address to)`.
+        skim(to: address) => [
+            read: [
+                var bal0 = balanceOf(sys::address) ~> m_token0;
+                var bal1 = balanceOf(sys::address) ~> m_token1;
+            ]
+            sweep where bal0 >= m_reserve0 && bal1 >= m_reserve1 : throw 130 : [
+                transfer(to, bal0 - m_reserve0) ~> m_token0
+                transfer(to, bal1 - m_reserve1) ~> m_token1
+            ]
+        ]
+
+        view getReserves() -> (U256, U256, u64) => [
+            return((m_reserve0, m_reserve1, m_block_timestamp_last))
+        ]
+
+        view balanceOf(owner: address) -> U256 => [
+            return(lp_balance(m_balances, owner))
+        ]
+
+        view totalSupply() -> U256 => [ return(m_total_supply) ]
+        view token0()      -> address => [ return(m_token0) ]
+        view token1()      -> address => [ return(m_token1) ]
+        view kLast()       -> U256 => [ return(m_k_last) ]
+        view price0CumulativeLast() -> U256 => [ return(m_price0_cumulative_last) ]
+        view price1CumulativeLast() -> U256 => [ return(m_price1_cumulative_last) ]
+    }
+
+    // Reserves are written from the captured `bal0` / `bal1`. For
+    // `swap` the `bal0` / `bal1` come from the `callback:` phase
+    // (post-flash-loan re-read); for `mint` and `sync` they come from
+    // `read:`. For `burn` we compute the post-payout reserve
+    // algebraically — equivalent to re-reading under no-reentrancy
+    // (see route comment).
+    m_reserve0: U256 {
+        in mint(_)          => tally:  bal0
+        in burn(_)          => payout: bal0 -
+            mul_div(m_balances[sys::address], bal0, m_total_supply)
+        in swap(_, _, _, _) => check:  bal0
+        in sync()           => commit: bal0
+        in skim(_)          => sweep:  m_reserve0
+    }
+
+    m_reserve1: U256 {
+        in mint(_)          => tally:  bal1
+        in burn(_)          => payout: bal1 -
+            mul_div(m_balances[sys::address], bal1, m_total_supply)
+        in swap(_, _, _, _) => check:  bal1
+        in sync()           => commit: bal1
+        in skim(_)          => sweep:  m_reserve1
+    }
+
+    // LP token total supply. Initial mint mints `sqrt(bal0 * bal1) -
+    // MINIMUM_LIQUIDITY` to `to` and locks `MINIMUM_LIQUIDITY` to the
+    // zero address (out of scope here — the Cambrian translation
+    // simplifies to "burn the minimum_liquidity from the pool" by not
+    // crediting it to anyone). Subsequent mints mint
+    // `min(bal0 * total / reserve0, bal1 * total / reserve1)`.
+    //
+    // The two branches are written as a single `if` over
+    // `m_total_supply == 0`; the EVM backend's G-T6 fix guarantees
+    // `if/else` in transform bodies lowers to conditional writes.
+    m_total_supply: U256 {
+        in mint(_) => tally: {
+            if m_total_supply == 0 {
+                m_total_supply + sqrt(bal0 * bal1) - 1000
+            } else {
+                m_total_supply +
+                    min(mul_div(bal0 - m_reserve0, m_total_supply, m_reserve0),
+                        mul_div(bal1 - m_reserve1, m_total_supply, m_reserve1))
+            }
+        }
+        in burn(_) => payout: {
+            m_total_supply - m_balances[sys::address]
+        }
+    }
+
+    // LP token balances, keyed by holder address. Standard ERC20
+    // accounting; updated by `mint` (credit `to`), `burn` (debit
+    // `sys::address`, the contract itself, since OZ's flow is
+    // "user transfers their LP to the pair, then calls burn").
+    m_balances: HashMap<address, U256> {
+        in mint(to) => tally: {
+            let bal_to = lp_balance(m_balances, to);
+            let minted = if m_total_supply == 0 {
+                sqrt(bal0 * bal1) - 1000
+            } else {
+                min(mul_div(bal0 - m_reserve0, m_total_supply, m_reserve0),
+                    mul_div(bal1 - m_reserve1, m_total_supply, m_reserve1))
+            };
+            m_balances.update(to, bal_to + minted)
+        }
+        in burn(_) => payout: {
+            m_balances.update(sys::address, 0)
+        }
+    }
+
+    // Snapshot of K = reserve0 * reserve1 used by the (out-of-scope)
+    // protocol-fee calculation. Updated on every state-changing route
+    // so the next `_mintFee` snapshot is in step. v1 keeps the field
+    // present so the storage layout matches OZ but does not actually
+    // mint protocol fees (the `m_fee_to` cross-contract read is the
+    // remaining piece; tracked as PLAN.md `protocol-fee` followup).
+    m_k_last: U256 {
+        in mint(_)          => tally:  bal0 * bal1
+        in burn(_)          => payout: {
+            let r0 = bal0 - mul_div(m_balances[sys::address], bal0, m_total_supply);
+            let r1 = bal1 - mul_div(m_balances[sys::address], bal1, m_total_supply);
+            r0 * r1
+        }
+        in swap(_, _, _, _) => check:  bal0 * bal1
+        in sync()           => commit: bal0 * bal1
+    }
+
+    // Block-timestamp of the last reserve update. G-T7 verified:
+    // `sys::timestamp` lowers to `block.timestamp` in member
+    // transforms. The OZ contract uses a 32-bit downcast; we keep the
+    // full u64 here.
+    m_block_timestamp_last: u64 {
+        in mint(_)          => tally:  sys::timestamp
+        in burn(_)          => payout: sys::timestamp
+        in swap(_, _, _, _) => check:  sys::timestamp
+        in sync()           => commit: sys::timestamp
+    }
+
+    // UQ112x112 cumulative-price oracle (upstream:
+    // `price0CumulativeLast` / `price1CumulativeLast`). Updated on
+    // every reserves-changing route; the addition is intentionally a
+    // wrapping add (`+%`) to mirror Solidity 0.7 unchecked semantics —
+    // TWAP consumers compute deltas modulo 2**256.
+    //
+    // `time_elapsed * uqdiv(reserveOther, reserveSelf)` cannot
+    // overflow at realistic reserve sizes (uqdiv result ≤ 2**224 for
+    // 112-bit reserves; time_elapsed ≤ 2**32), so the inner mul stays
+    // in checked arithmetic. Only the final accumulation wraps.
+    //
+    // Member transforms read pre-update state, so `m_reserve0` /
+    // `m_reserve1` here are last-tick values — the same window
+    // upstream uses.
+    m_price0_cumulative_last: U256 {
+        in mint(_)          => tally:  m_price0_cumulative_last +%
+            twap_delta0(sys::timestamp -% m_block_timestamp_last, m_reserve0, m_reserve1)
+        in burn(_)          => payout: m_price0_cumulative_last +%
+            twap_delta0(sys::timestamp -% m_block_timestamp_last, m_reserve0, m_reserve1)
+        in swap(_, _, _, _) => check:  m_price0_cumulative_last +%
+            twap_delta0(sys::timestamp -% m_block_timestamp_last, m_reserve0, m_reserve1)
+        in sync()           => commit: m_price0_cumulative_last +%
+            twap_delta0(sys::timestamp -% m_block_timestamp_last, m_reserve0, m_reserve1)
+    }
+
+    m_price1_cumulative_last: U256 {
+        in mint(_)          => tally:  m_price1_cumulative_last +%
+            twap_delta1(sys::timestamp -% m_block_timestamp_last, m_reserve0, m_reserve1)
+        in burn(_)          => payout: m_price1_cumulative_last +%
+            twap_delta1(sys::timestamp -% m_block_timestamp_last, m_reserve0, m_reserve1)
+        in swap(_, _, _, _) => check:  m_price1_cumulative_last +%
+            twap_delta1(sys::timestamp -% m_block_timestamp_last, m_reserve0, m_reserve1)
+        in sync()           => commit: m_price1_cumulative_last +%
+            twap_delta1(sys::timestamp -% m_block_timestamp_last, m_reserve0, m_reserve1)
+    }
+}

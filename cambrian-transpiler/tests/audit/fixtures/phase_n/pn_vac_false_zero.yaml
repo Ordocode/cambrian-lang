@@ -1,0 +1,8 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pn-vac-false-zero
+target: lean
+output_dir: build/
+sources:
+  - pn_vac_false_zero.cam

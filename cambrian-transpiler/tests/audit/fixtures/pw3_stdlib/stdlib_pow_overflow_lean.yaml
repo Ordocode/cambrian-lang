@@ -1,0 +1,11 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pw3-stdlib-pow-lean
+target: lean
+deterministic_addresses: true
+output_dir: build/
+lean:
+  numerics: overflow-panic
+sources:
+  - stdlib_pow_overflow.cam

@@ -1,0 +1,67 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Registry — constructor, HashMap operations, String, views
+
+test "constructor sets name and empty entries" for Registry {
+    call constructor("myregistry")
+    expect state { m_entry_count: 0 }
+}
+
+test "putEntry adds entry and increments count" for Registry {
+    call constructor("test")
+
+    call putEntry(1, 100)
+    expect state { m_entry_count: 1 }
+
+    call putEntry(2, 200)
+    expect state { m_entry_count: 2 }
+}
+
+test "getEntry returns stored value" for Registry {
+    call constructor("reg")
+
+    call putEntry(42, 999)
+    call getEntry(42)
+    expect return 999
+}
+
+test "getEntryCount tracks insertions" for Registry {
+    call constructor("reg")
+
+    call getEntryCount()
+    expect return 0
+
+    call putEntry(1, 10)
+    call putEntry(2, 20)
+    call getEntryCount()
+    expect return 2
+}
+
+test "putEntry overwrites same key" for Registry {
+    call constructor("reg")
+
+    call putEntry(1, 100)
+    call getEntry(1)
+    expect return 100
+
+    call putEntry(1, 999)
+    call getEntry(1)
+    expect return 999
+}
+
+test "getName returns constructor name" for Registry {
+    call constructor("hello_world")
+    call getName()
+    expect return "hello_world"
+}
+
+test "no effects on put and get" for Registry {
+    call constructor("reg")
+
+    call putEntry(1, 42)
+    expect effects []
+
+    call getEntry(1)
+    expect effects []
+}

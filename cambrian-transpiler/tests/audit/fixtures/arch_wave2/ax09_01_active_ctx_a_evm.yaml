@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: arch-ax09-01-a-evm
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - ax09_01_active_ctx.cam

@@ -1,0 +1,15 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity Token {
+    const INITIAL_SUPPLY: U256 = 1000
+
+    routes {
+        constructor() => []
+        view totalSupply() -> U256 => [ return(m_total) ]
+    }
+
+    m_total: U256 {
+        in constructor() => INITIAL_SUPPLY
+    }
+}

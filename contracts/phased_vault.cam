@@ -1,0 +1,48 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Phased Vault — integration test for phased routes.
+// Demonstrates commit + exit with intermediate state snapshots.
+
+use gosh
+
+entity PhasedVault {
+    routes {
+        deposit(amount: u128) => [
+            save: [
+                gosh::commit()
+            ]
+            finish: []
+        ]
+
+        withdraw(amount: u128)
+            where m_balance >= amount : throw 100
+        => [
+            deduct: [
+                gosh::rawReserve(100, 0)
+            ]
+            send: [
+                ~> m_owner
+            ]
+        ]
+
+        emergency_halt(code: u32) => [
+            checkpoint: [
+                gosh::commit()
+            ]
+            halt: [
+                gosh::exit(code)
+            ]
+        ]
+    }
+
+    m_balance: u128 {
+        in deposit(amount) => save: m_balance + amount
+        in withdraw(amount) => deduct: m_balance - amount
+    }
+
+    m_owner: address {}
+    m_halted: bool {
+        in emergency_halt(code) => checkpoint: true
+    }
+}

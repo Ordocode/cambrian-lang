@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pm-m13-h3
+target: evm
+output_dir: build/
+deterministic_addresses: true
+sources:
+  - ../evm_h3_rescue_callroute.cam

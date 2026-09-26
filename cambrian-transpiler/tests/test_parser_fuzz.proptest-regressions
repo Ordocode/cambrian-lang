@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b3056511c09b1f672832029bf4e9265e7cc3cacbcc38f33bb4c0541318d140f9 # shrinks to entity = "entity A {\n    routes {\n        for(jj: u8, dv__7: u32, o_: u64) => []\n    }\n\n}"
+cc a542f7317daa4acdaad6b2544f20e24bdb9c6dec43ed07c2650dadae27410648 # shrinks to name = "A", fields = ["var: u8"]

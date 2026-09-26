@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-EVM-HARNESS-001 / PM-029: route lowering uses IR; Foundry harness uses AST gen_expr_test.
+
+entity HarnessIr {
+    routes {
+        mix(a: u8, b: u64) -> u64 => [
+            return(a + b)
+        ]
+
+        probe() -> u64 => [
+            return(1 as u8 + 2 as u64)
+        ]
+    }
+
+    m_x: u64 {}
+}
+
+test "probe return oracle" for HarnessIr {
+    call probe()
+    expect return 1 as u8 + 2 as u64
+}

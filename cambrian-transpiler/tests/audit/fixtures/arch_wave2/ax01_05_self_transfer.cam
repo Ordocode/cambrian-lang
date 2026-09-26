@@ -1,0 +1,28 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-031 / H-AX-01-05: raw `~> Self.address() with { value }` — EVM permits
+// self-transfer and runs `receive()`; Lean `WorldState.transfer` rejects
+// `TransferError.selfTransfer`.
+
+entity SelfReceiver {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        accept receive() => []
+
+        paySelf(amount: u128) => [
+            ~> SelfReceiver.address() with { value: amount }
+        ]
+
+        getDeposits() -> u128 => [
+            return(m_deposits)
+        ]
+    }
+
+    m_deposits: u128 {
+        in constructor() => 0
+        in receive() => m_deposits + msg::value as u128
+    }
+}

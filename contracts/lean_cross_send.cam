@@ -1,0 +1,27 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// P4a smoke: cross-entity typed send to in-program Treasury.address().
+
+entity Treasury {
+    routes {
+        init create() => []
+        credit(amount: u64) => []
+    }
+    m_total: u64 {
+        in create() => 0
+        in credit(amount) => m_total + amount
+    }
+}
+
+entity Vault {
+    routes {
+        init create() => []
+        deposit(amount: u64) => [
+            credit(amount) ~> Treasury.address()
+        ]
+    }
+    m_balance: u64 {
+        in create() => 0
+    }
+}

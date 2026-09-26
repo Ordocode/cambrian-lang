@@ -1,0 +1,364 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Ground-truth Cambrian specification for RehearsalToken (RHT).
+// Authored from BLS, product description, architecture, and verification plan.
+// Entity skeleton defines the naming baseline for CPE implementation.
+
+pure fn balance_of(balances: HashMap<address, U256>, owner: address) -> U256 {
+    balances[owner]
+}
+
+pure fn allowance_of(allowances: HashMap<U256, U256>,
+                     owner: address, spender: address) -> U256 {
+    allowances[hashOf(owner, spender)]
+}
+
+entity RehearsalToken {
+
+    const INITIAL_SUPPLY: U256 = 1000000000000000000000000
+    const ZERO: address = 0x0000000000000000000000000000000000000000
+
+    routes {
+        #[factory_only]
+        constructor(initial_holder: address) => []
+
+        transfer(to: address, amount: U256)
+            where to != ZERO : throw 201 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 202
+        => []
+
+        approve(spender: address, amount: U256)
+            where spender != ZERO : throw 201
+        => []
+
+        transferFrom(from_addr: address, to: address, amount: U256)
+            where from_addr != ZERO && to != ZERO : throw 201 &&
+                  balance_of(m_balances, from_addr) >= amount : throw 202 &&
+                  allowance_of(m_allowances, from_addr, msg::sender) >= amount : throw 203
+        => []
+
+        view name() -> String => [ return("Rehearsal Token") ]
+        view symbol() -> String => [ return("RHT") ]
+        view decimals() -> u8 => [ return(18) ]
+        view totalSupply() -> U256 => [ return(m_total_supply) ]
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+        view allowance(owner: address, spender: address) -> U256 => [
+            return(allowance_of(m_allowances, owner, spender))
+        ]
+        view owner() -> address => [ return(m_owner) ]
+    }
+
+    m_total_supply: U256 {
+        in constructor(initial_holder) => INITIAL_SUPPLY
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(initial_holder) => {
+            {}.insert(initial_holder, INITIAL_SUPPLY)
+        }
+        in transfer(to, amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            let bal_to   = balance_of(m_balances, to);
+            m_balances
+                .update(msg::sender, bal_from - amount)
+                .update(to,          bal_to   + amount)
+        }
+        in transferFrom(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            m_balances
+                .update(from_addr, bal_from - amount)
+                .update(to,        bal_to   + amount)
+        }
+    }
+
+    m_allowances: HashMap<U256, U256> {
+        in approve(spender, amount) => {
+            m_allowances.update(hashOf(msg::sender, spender), amount)
+        }
+        in transferFrom(from_addr, _, amount) => {
+            let key = hashOf(from_addr, msg::sender);
+            let prev = allowance_of(m_allowances, from_addr, msg::sender);
+            m_allowances.update(key, prev - amount)
+        }
+    }
+
+    m_owner: address {
+        in constructor(initial_holder) => initial_holder
+    }
+}
+
+// @from: BLS §5 Global Invariants / verification-plan INV-RHT-001
+invariant "INV-RHT-001 FixedTotalSupply" for RehearsalToken {
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action transfer(to: address, amount: U256) { }
+    action approve(spender: address, amount: U256) { }
+    action transferFrom(from_addr: address, to: address, amount: U256) { }
+
+    check totalSupply() == INITIAL_SUPPLY
+}
+
+// @from: PD UC-1 / verification-plan PROP-RHT-001
+property "PROP-RHT-001 ConstructorInitialMint" () for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    call constructor(deployer)
+    msg { sender: deployer }
+
+    call totalSupply()
+    expect return INITIAL_SUPPLY
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY
+    call balanceOf(bob)
+    expect return 0
+    call balanceOf(carol)
+    expect return 0
+}
+
+// @from: PD HP-1 / verification-plan PROP-RHT-002
+property "PROP-RHT-002 ConstructorMetadata" () for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    call constructor(deployer)
+    msg { sender: deployer }
+
+    call name()
+    expect return "Rehearsal Token"
+    call symbol()
+    expect return "RHT"
+    call decimals()
+    expect return 18
+}
+
+// @from: BLS Scenario Transfer / verification-plan PROP-RHT-003, INV-RHT-006
+property "PROP-RHT-003 TransferConservation" (amount: U256) for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+    call constructor(deployer)
+    msg { sender: deployer }
+    call balanceOf(carol)
+    expect return 0
+    call transfer(bob, amount)
+    expect state { m_total_supply: INITIAL_SUPPLY }
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY - amount
+    call balanceOf(bob)
+    expect return amount
+    call balanceOf(carol)
+    expect return 0
+}
+
+// @from: BLS §5 / verification-plan PROP-RHT-004
+property "PROP-RHT-004 TransferRevertsZeroRecipient" (amount: U256) for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    assume amount <= INITIAL_SUPPLY
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(ZERO, amount)
+    expect throw 201
+}
+
+// @from: BLS §5 / verification-plan PROP-RHT-005
+property "PROP-RHT-005 TransferRevertsInsufficientBalance" (amount: U256) for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    assume amount > INITIAL_SUPPLY
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(bob, amount)
+    expect throw 202
+}
+
+// @from: BLS §5 Global Invariants / verification-plan PROP-RHT-006
+property "PROP-RHT-006 TransferZeroAmountPermitted" () for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call transfer(bob, 0)
+    expect state { m_total_supply: INITIAL_SUPPLY }
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY
+}
+
+// @from: BLS Scenario Approve / verification-plan PROP-RHT-008
+property "PROP-RHT-008 ApproveSetsAllowance" (amount: U256) for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    assume amount <= INITIAL_SUPPLY
+    call constructor(deployer)
+    msg { sender: deployer }
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY
+    call balanceOf(bob)
+    expect return 0
+    call approve(spender, amount)
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY
+    call balanceOf(bob)
+    expect return 0
+    call allowance(deployer, spender)
+    expect return amount
+}
+
+// @from: BLS §5 / verification-plan PROP-RHT-009
+property "PROP-RHT-009 ApproveRevertsZeroSpender" (amount: U256) for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(ZERO, amount)
+    expect throw 201
+}
+
+// @from: BLS Scenario TransferFrom / verification-plan PROP-RHT-010, INV-RHT-007
+property "PROP-RHT-010 TransferFromConservationAndAllowanceDecr" (amount: U256) for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let bob      = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+    call constructor(deployer)
+    msg { sender: deployer }
+    call balanceOf(bob)
+    expect return 0
+    call approve(spender, amount)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, amount)
+
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY - amount
+    call balanceOf(carol)
+    expect return amount
+    call balanceOf(bob)
+    expect return 0
+    msg { sender: deployer }
+    call allowance(deployer, spender)
+    expect return 0
+    call totalSupply()
+    expect return INITIAL_SUPPLY
+}
+
+// @from: verification-plan INV-RHT-004 (partial allowance decrement)
+property "PROP-RHT-010a TransferFromPartialAllowanceDecr" (amount: U256) for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+    let spend    = amount - 1
+
+    assume amount > 1 && amount <= INITIAL_SUPPLY
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(spender, amount)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, spend)
+    call allowance(deployer, spender)
+    expect return 1
+}
+
+// @from: BLS §5 / verification-plan PROP-RHT-011
+property "PROP-RHT-011 TransferFromRevertsInsufficientAllowance" (amount: U256) for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(spender, amount - 1)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, amount)
+    expect throw 203
+}
+
+// @from: BLS §5 / verification-plan PROP-RHT-012
+property "PROP-RHT-012 TransferFromRevertsInsufficientBalance" (amount: U256) for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let carol    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    assume amount > INITIAL_SUPPLY
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(spender, amount)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, amount)
+    expect throw 202
+}
+
+// @from: BLS §5 / verification-plan PROP-RHT-013
+property "PROP-RHT-013 TransferFromRevertsZeroAddress" (amount: U256) for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+
+    assume amount > 0 && amount <= INITIAL_SUPPLY
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(spender, amount)
+    msg { sender: spender }
+    call transferFrom(ZERO, deployer, amount)
+    expect throw 201
+    call transferFrom(deployer, ZERO, amount)
+    expect throw 201
+}
+
+// @from: BLS Scenario QueryTokenState / verification-plan PROP-RHT-015
+property "PROP-RHT-015 BalanceOfReflectsStorage" () for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call balanceOf(deployer)
+    expect return INITIAL_SUPPLY
+}
+
+// @from: verification-plan PROP-RHT-016
+property "PROP-RHT-016 AllowanceReflectsStorage" (amount: U256) for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+
+    assume amount <= INITIAL_SUPPLY
+    call constructor(deployer)
+    msg { sender: deployer }
+    call approve(spender, amount)
+    call allowance(deployer, spender)
+    expect return amount
+}
+
+// @from: verification-plan PROP-RHT-017
+property "PROP-RHT-017 TotalSupplyReflectsStorage" () for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call totalSupply()
+    expect return INITIAL_SUPPLY
+}
+
+// @from: BLS Scenario DeployFixedSupply / verification-plan PROP-RHT-021
+property "PROP-RHT-021 OwnerIsDeployer" () for RehearsalToken {
+    let deployer = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    call constructor(deployer)
+    msg { sender: deployer }
+    call owner()
+    expect return deployer
+}

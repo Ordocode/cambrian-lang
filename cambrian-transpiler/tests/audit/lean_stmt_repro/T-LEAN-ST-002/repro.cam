@@ -1,0 +1,17 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+extern entity Oracle {
+    view route isAlive() -> bool;
+}
+
+entity Caller {
+    routes {
+        constructor(oracle: Address<Oracle>) => []
+        check(flag: bool) -> bool => [
+            if flag => [ var alive = isAlive() ~> m_oracle; ]
+            return(alive)
+        ]
+    }
+    m_oracle: Address<Oracle> { in constructor(oracle) => oracle }
+}

@@ -1,0 +1,37 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Broker — createOrder protected by from Shop clause
+
+test "constructor initializes processed to 0" for Broker skip from with { m_shop_id: 1 } {
+    registry Shop { code_hash: 0x36426260c9763b11e9f231056c63cf49b5786f57ef55a30f482cb80e13162405, code_depth: 44, wasm_hash: 0x5f5eca4ad304a772c17b9b4805200b4acb7c442a4ba6834b10a84d66999e0924 }
+    registry Ledger { code_hash: 0x05457eab245a0e13ea3e34802a48304959392f2aa0fe866e7553f33d2313a624, code_depth: 44, wasm_hash: 0x67c7820630e277558a39dc838d1f4bce9f1bffbf6e4f5545356d4576fb751b0d }
+    call constructor()
+    expect state { m_processed: 0 }
+}
+
+test "createOrder increments processed counter" for Broker skip from with { m_shop_id: 5 } {
+    registry Shop { code_hash: 0x36426260c9763b11e9f231056c63cf49b5786f57ef55a30f482cb80e13162405, code_depth: 44, wasm_hash: 0x5f5eca4ad304a772c17b9b4805200b4acb7c442a4ba6834b10a84d66999e0924 }
+    registry Ledger { code_hash: 0x05457eab245a0e13ea3e34802a48304959392f2aa0fe866e7553f33d2313a624, code_depth: 44, wasm_hash: 0x67c7820630e277558a39dc838d1f4bce9f1bffbf6e4f5545356d4576fb751b0d }
+    call constructor()
+    expect state { m_processed: 0 }
+
+    call createOrder(101, 500)
+    expect state { m_processed: 1 }
+
+    call createOrder(102, 750)
+    expect state { m_processed: 2 }
+}
+
+test "getProcessed returns counter" for Broker skip from with { m_shop_id: 5 } {
+    registry Shop { code_hash: 0x36426260c9763b11e9f231056c63cf49b5786f57ef55a30f482cb80e13162405, code_depth: 44, wasm_hash: 0x5f5eca4ad304a772c17b9b4805200b4acb7c442a4ba6834b10a84d66999e0924 }
+    registry Ledger { code_hash: 0x05457eab245a0e13ea3e34802a48304959392f2aa0fe866e7553f33d2313a624, code_depth: 44, wasm_hash: 0x67c7820630e277558a39dc838d1f4bce9f1bffbf6e4f5545356d4576fb751b0d }
+    call constructor()
+
+    call getProcessed()
+    expect return 0
+
+    call createOrder(1, 100)
+    call getProcessed()
+    expect return 1
+}

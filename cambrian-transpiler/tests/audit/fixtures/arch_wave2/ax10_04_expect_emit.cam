@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-032 / H-AX-10-04: `expect emit` in `test` — EVM lowers to `vm.expectEmit`;
+// Lean spec drops the step (observability deferred).
+
+entity EmitProbe {
+    event Logged(v: u64);
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        log(v: u64) => [
+            emit Logged(v);
+        ]
+    }
+}
+
+test "expect logged" for EmitProbe {
+    expect emit Logged(7)
+    call log(7)
+}

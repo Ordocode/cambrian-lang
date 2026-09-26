@@ -1,0 +1,46 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+[package]
+name = "cambrian-transpiler"
+# Placeholder — release/check-public-tree.sh replaces it at staging with the
+# version from the private cambrian-transpiler/Cargo.toml (single source).
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "Transpiler for the Cambrian language: .cam → Solidity / Lean"
+autobins = false
+
+[build-dependencies]
+lalrpop = "0.22"
+
+[dependencies]
+cambrian-core = { path = "../cambrian-core", default-features = false, features = [] }
+lalrpop-util = { version = "0.22", features = ["lexer", "unicode"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yml = "0.0.12"
+sha2 = "0.10"
+
+[features]
+default = []
+
+# The CLI binary (src/main.rs ships; src/bin/* stays private via autobins = false).
+[[bin]]
+name = "cambrian-transpiler"
+path = "src/main.rs"
+
+[dev-dependencies]
+proptest = "1.10.0"
+cambrian-core = { path = "../cambrian-core" }
+which = "7"
+tempfile = "3"
+
+[[test]]
+name = "test_audit_fuzz"
+path = "tests/test_audit_fuzz.rs"
+
+[[test]]
+name = "test_audit_examples"
+path = "tests/test_audit_examples.rs"

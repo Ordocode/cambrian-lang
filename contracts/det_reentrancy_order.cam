@@ -1,0 +1,42 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Phases Q1 regression: an unphased route that does (a) a member transform
+// changing state to a "Done" sentinel and (b) an external send must lower
+// SSTORE-BEFORE-CALL in the generated Solidity. This codifies the
+// checks-effects-interactions guarantee on EVM for unphased routes.
+//
+// If the codegen ever reorders these (e.g., emits actions before transforms),
+// the assertion in test_project.rs will catch it.
+
+enum WithdrawState {
+    Pending,
+    Done
+}
+
+entity ReentrancyTarget {
+    identity m_id: u64
+    routes {
+        #[factory_only]
+        constructor() => []
+        receivePayload() => []
+    }
+}
+
+entity ReentrancyVault {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        withdraw(target_id: u64) => [
+            receivePayload() ~> ReentrancyTarget.address(target_id)
+        ]
+    }
+
+    m_state: WithdrawState {
+        in constructor() => WithdrawState::Pending
+        in withdraw(target_id) => WithdrawState::Done
+    }
+}

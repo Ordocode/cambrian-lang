@@ -1,0 +1,16 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-VAL-008 control: Vec / HashMap / Option must not trigger E19.
+
+entity X {
+    routes {
+        view get() -> u64 => [
+            return(0)
+        ]
+    }
+
+    m_xs: Vec<u64> {}
+    m_map: HashMap<address, u64> {}
+    m_opt: Option<u64> {}
+}

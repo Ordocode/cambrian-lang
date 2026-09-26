@@ -1,0 +1,29 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-CONT-001 / PM-003 (MA-N01): `deploy` on Container must not silently stub.
+
+entity Child {
+    identity id: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+    }
+
+    m_x: u64 {
+        in create() => id
+    }
+}
+
+entity Parent {
+    routes {
+        #[factory_only]
+        init create() => []
+        spawn(k: u64) => [
+            deploy Child(k)
+        ]
+    }
+
+    m_n: u64 {}
+}

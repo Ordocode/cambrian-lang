@@ -1,0 +1,28 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+test "self call before sut deploy uses default inst" for Pair {
+    call token0()
+    expect return 0
+}
+
+test "self call after sut deploy uses deployed inst" for Pair {
+    deploy t0 = Peer(sys::address, 1000) with { m_id: 0 }
+    deploy t1 = Peer(sys::address, 1000) with { m_id: 1 }
+    deploy pair = Pair() with { m_token0: t0, m_token1: t1 }
+
+    call token0()
+    expect return t0
+    call token1()
+    expect return t1
+}
+
+test "redeploy updates active sut inst" for Pair {
+    deploy t0 = Peer(sys::address, 1000) with { m_id: 0 }
+    deploy t1 = Peer(sys::address, 1000) with { m_id: 1 }
+    deploy pair = Pair() with { m_token0: t0, m_token1: t1 }
+    deploy pair2 = Pair() with { m_token0: t0, m_token1: t1 }
+
+    call token0()
+    expect return t0
+}

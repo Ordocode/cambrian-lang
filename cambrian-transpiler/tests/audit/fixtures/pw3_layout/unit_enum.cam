@@ -1,0 +1,31 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-S-001 / PW3-O-003: unit enum packs with u64; compute_layout over-allocates enum.
+
+enum Color {
+    Red,
+    Green,
+}
+
+entity UnitEnum {
+    routes {
+        #[factory_only]
+        constructor() => []
+        bump(n: u64) => []
+    }
+
+    m_c: Color {
+        in constructor() => Red
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+        in bump(n) => m_x + n
+    }
+}
+
+test "pw3 layout seed m_x" for UnitEnum with { m_x: 7 } {
+    call bump(1)
+    expect state { m_x: 8 }
+}

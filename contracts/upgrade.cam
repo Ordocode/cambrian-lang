@@ -1,0 +1,42 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+use gosh
+
+entity Upgradeable {
+
+    routes {
+        init constructor(owner: U256) => []
+
+        increment(amount: u64) => []
+
+        updateCode(newcode: CamData, newWasmHash: U256, cell: CamData)
+            where msg::pubkey == m_owner : throw 100
+            => [
+                gosh::commit()
+                let (newOwner, _) = gosh::decode::<U256>(cell);
+                gosh::updateCode(newcode, newWasmHash) with onCodeUpgrade(newOwner)
+            ]
+
+        private onCodeUpgrade(newOwner: U256) => []
+
+        view getCount() -> u64 => [
+            return(m_count)
+        ]
+
+        view getOwner() -> U256 => [
+            return(m_owner)
+        ]
+    }
+
+    m_owner: U256 {
+        in constructor(owner) => owner
+        in onCodeUpgrade(newOwner) => newOwner
+    }
+
+    m_count: u64 {
+        in constructor(_) => 0
+        in increment(amount) => m_count + amount
+        in onCodeUpgrade(_) => 0
+    }
+}

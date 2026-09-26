@@ -1,0 +1,17 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-LEAN-SPEC-001 / PM-005 (MA-LSPEC01): effects-only test must not collapse
+// to vacuous `| .ok w => True`.
+
+entity E {
+    m_x: u64 {
+        in pay(v) => m_x + v
+    }
+
+    routes {
+        pay(v: u64) => [
+            ~> msg::sender
+        ]
+    }
+}

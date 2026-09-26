@@ -1,0 +1,57 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+invariant "count never exceeds bound" for Counter {
+    init { m_count: 0 }
+
+    action increment(amount: u64) {
+        bound amount in 0..1000
+    }
+    action reset() { }
+
+    check m_count <= 1000000000
+}
+
+invariant "reset zeroes count" for Counter
+    #[fail_on_revert]
+{
+    init { m_count: 0 }
+
+    action increment(amount: u64) {
+        bound amount in 0..100
+    }
+    action reset() { }
+
+    check m_count >= 0
+}
+
+// Forall demo: the starting count is universally quantified (`m_count: *`).
+// The Lean theorem proves the bound holds from ANY initial count, while the
+// dynamic (Foundry/revm) backends seed `m_count` with a fuzzer-random value.
+invariant "count bounded from any start" for Counter {
+    init { m_count: * }
+
+    action increment(amount: u64) {
+        bound amount in 0..100
+    }
+    action reset() { }
+
+    check m_count >= 0
+}
+
+// Context-forall demo: the initial timestamp and the calling sender are
+// universally quantified via a dedicated `ctx { ... }` record (separate from
+// the entity-state `init`). On Lean the message sender is `∀`-bound; on the
+// dynamic backends `sys::now` seeds a random initial timestamp and
+// `msg::sender` is fuzzed (per call on Foundry, per case on revm).
+invariant "count bounded from any time" for Counter {
+    init { m_count: 0 }
+    ctx { sys::now: *, msg::sender: * }
+
+    action increment(amount: u64) {
+        bound amount in 0..100
+    }
+    action reset() { }
+
+    check m_count >= 0
+}

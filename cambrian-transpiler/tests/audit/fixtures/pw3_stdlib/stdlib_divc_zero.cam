@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-009: std::math::divc on zero divisor — EVM must revert; Lean divc returns 0.
+
+entity StdDivcZero {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        divcZero() -> u64 => [
+            return(std::math::divc(m_a, m_b))
+        ]
+    }
+
+    m_a: u64 {
+        in constructor() => 1
+    }
+
+    m_b: u64 {
+        in constructor() => 0
+    }
+}

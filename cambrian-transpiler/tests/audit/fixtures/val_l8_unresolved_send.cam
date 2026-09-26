@@ -1,0 +1,40 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit contract T-VAL-003b (L8): typed send to a plain-`address` dest that does
+// not statically resolve to `<Entity>.address(...)` and whose message has no
+// in-program route (dispatch axiom can't be synthesised).
+//
+// Note: `credit() ~> m_dest` with Treasury.credit present is P4d-accepted
+// (untyped dispatch) and does *not* trigger L8 — so we use `ghostCredit`
+// (no such route) to surface the validator error without AST injection.
+
+entity Treasury {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+        credit() => []
+    }
+
+    m_total: u64 {
+        in create() => 0
+        in credit() => m_total
+    }
+}
+
+entity Sender {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+
+        pay(m_dest: address) => [
+            ghostCredit() ~> m_dest
+        ]
+    }
+
+    m_x: u64 {}
+}

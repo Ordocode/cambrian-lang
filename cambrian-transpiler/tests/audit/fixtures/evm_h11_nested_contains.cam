@@ -1,0 +1,19 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H11: nested HashMap.contains() may reference
+// _inner_exists without emitting the sidecar (detection only checks .exists).
+
+entity Allowance {
+    routes {
+        #[factory_only]
+        constructor() => []
+        hasPair(owner: address, spender: address) -> bool => [
+            return(m_allowances[owner].contains(spender))
+        ]
+    }
+
+    m_allowances: HashMap<address, HashMap<address, u64>> {
+        in constructor() => HashMap::new()
+    }
+}

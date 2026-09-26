@@ -1,0 +1,112 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for marketplace entities — Order has from clauses (Treasury, Shop)
+
+test "Order constructor sets initial state" for Order skip from {
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call constructor(1, 10, seller, 5000)
+    expect state {
+        m_order_id: 1,
+        m_shop_id: 10,
+        m_amount: 5000,
+        m_confirmed: false
+    }
+}
+
+test "Order confirmPayment sets confirmed" for Order skip from {
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call constructor(1, 10, seller, 5000)
+    expect state { m_confirmed: false }
+
+    call confirmPayment(5000)
+    expect state { m_confirmed: true }
+}
+
+test "Order confirmPayment wrong amount throws" for Order skip from {
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call constructor(1, 10, seller, 5000)
+
+    call confirmPayment(9999)
+    expect throw 10
+}
+
+test "Order releaseOrder fails when not confirmed" for Order skip from {
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call constructor(1, 10, seller, 5000)
+
+    call releaseOrder()
+    expect throw 11
+}
+
+test "Order releaseOrder sends payment after confirm" for Order skip from {
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call constructor(1, 10, seller, 5000)
+
+    call confirmPayment(5000)
+    expect state { m_confirmed: true }
+
+    call releaseOrder()
+    expect effects [~> seller, ..]
+}
+
+test "Order getStatus returns tuple" for Order skip from {
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call constructor(1, 10, seller, 5000)
+
+    call getStatus()
+    expect return.0 == false
+
+    call confirmPayment(5000)
+    call getStatus()
+    expect return.0 == true
+}
+
+test "Treasury constructor and deposit" for Treasury {
+    call constructor(1)
+    expect state { m_shop_id: 1, m_order_count: 0 }
+
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call deposit(100, seller, 5000)
+    expect state { m_order_count: 1 }
+}
+
+test "Treasury deposit zero amount throws" for Treasury {
+    call constructor(1)
+
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call deposit(100, seller, 0)
+    expect throw 22
+}
+
+test "Treasury getOrderCount tracks deposits" for Treasury {
+    call constructor(1)
+    call getOrderCount()
+    expect return 0
+
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call deposit(1, seller, 100)
+    call getOrderCount()
+    expect return 1
+
+    let seller2 = 0x0000000000000000000000000000000000000000000000000000000000000003
+    call deposit(2, seller2, 200)
+    call getOrderCount()
+    expect return 2
+}
+
+test "Shop constructor sets shop_id" for Shop {
+    call constructor(42)
+    expect state { m_shop_id: 42 }
+
+    call getShopId()
+    expect return 42
+}
+
+test "Shop createOrder requires positive amount" for Shop {
+    call constructor(1)
+
+    let seller = 0x0000000000000000000000000000000000000000000000000000000000000002
+    call createOrder(1, seller, 0)
+    expect throw 1
+}

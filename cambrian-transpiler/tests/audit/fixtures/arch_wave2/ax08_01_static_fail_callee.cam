@@ -1,0 +1,40 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-002 / H-AX-08-01: static cross-entity typed send to fallible callee;
+// EVM propagates revert; Lean total caller may lower to exceptGetD (not dynamic dispatch).
+
+entity FailCallee {
+    identity cid: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+
+        guarded(x: u64) where (x > 0) : throw 7 => []
+    }
+
+    m_hit: u64 {
+        in create() => 0
+    }
+}
+
+entity StaticRelay {
+    identity sid: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+
+        relay(callee_id: u64, x: u64) => [
+            guarded(x) ~> FailCallee.address(callee_id)
+        ]
+    }
+
+    m_n: u64 {}
+
+    m_calls: u64 {
+        in create() => 0
+        in relay(callee_id, x) => m_calls + 1
+    }
+}

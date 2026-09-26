@@ -1,0 +1,25 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PN-106: extern revert — EVM propagates revert, Lean opaque axiom is total.
+
+extern entity Token {
+    route transfer(to: address, amount: u64) -> bool;
+}
+
+entity Wallet {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor(tok: Address<Token>) => []
+        pay(to: address, amt: u64) -> bool => [
+            var ok = transfer(to, amt) ~> m_tok;
+            return(ok)
+        ]
+    }
+
+    m_tok: Address<Token> {
+        in constructor(tok) => tok
+    }
+}

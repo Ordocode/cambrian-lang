@@ -1,0 +1,35 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: uniswap-v2
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - ERC20.cam
+  - ERC20.test.cam
+  - ERC20.fuzz.cam
+  - ERC20.invariant.cam
+  - UniswapV2Pair.cam
+  - UniswapV2Pair.test.cam
+  - UniswapV2Pair.fuzz.cam
+  - UniswapV2Pair.invariant.cam
+  - UniswapV2Factory.cam
+  - UniswapV2Factory.test.cam
+  - UniswapV2Factory.invariant.cam
+
+fuzz:
+  runs: 64
+  seed: 1
+  shrink: true
+  max_local_rejects: 4096
+
+invariant:
+  runs: 16
+  depth: 16
+  fail_on_revert: false
+  seed: 1
+
+foundry:
+  optimizer: true
+  via_ir: true

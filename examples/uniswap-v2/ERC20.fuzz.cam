@@ -1,0 +1,87 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Property fuzz: balance / allowance conservation under transfer +
+// transferFrom. Mirrors `examples/governor/ERC20Votes.fuzz.cam`.
+
+property "transfer conserves total supply" (amount: U256) for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    // `transfer` succeeds only for `0 < amount <= balance` (throws 1 on a zero
+    // amount, 2 on insufficient balance); alice holds 1000. Assume that window
+    // so the claim is over a successful call. (Property tools that sample the
+    // raw quantifier ignore the `fuzz` bound below, so this `assume` is what
+    // constrains them.)
+    assume amount > 0 && amount <= 1000
+    call constructor(alice, 1000)
+    msg { sender: alice }
+    call transfer(bob, amount)
+    expect state { m_total_supply: 1000 }
+
+    fuzz { amount in 1..500 }
+}
+
+// The claim above names two distinct holders, so it never reaches the case
+// where payer and payee are the same account — and that is the case the
+// accounting gets wrong. `transfer` reads both balances before it writes
+// either, so an aliased pair has the credit overwrite the debit. Note that
+// `m_total_supply` stays at 1000 throughout, which is why the conservation
+// claim cannot see this. Quantifying the holder is what makes it reachable.
+property "a self transfer creates nothing" (holder: address, amount: U256) for ERC20 {
+    // `zero_address()` is an entity-scope helper and is not in scope in the
+    // generated harness, so the guard is spelled as a literal here.
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume amount > 0 && amount <= 1000
+
+    call constructor(holder, 1000)
+    msg { sender: holder }
+    call transfer(holder, amount)
+
+    call balanceOf(holder)
+    expect return 1000
+
+    fuzz { amount in 1..500 }
+}
+
+property "mint then burn returns to original supply" (amount: U256) for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    // mint/burn both reject zero amounts (`where amount > 0 : throw 1`); assume
+    // it so the round-trip is over a pair of successful calls.
+    assume amount > 0
+    call constructor(alice, 1000)
+    call mint(bob, amount)
+    msg { sender: bob }
+    call burn(amount)
+
+    expect state { m_total_supply: 1000 }
+
+    fuzz { amount in 1..1000 }
+}
+
+property "approve then transferFrom drains exactly the allowance" (amount: U256) for ERC20 {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol = 0x0000000000000000000000000000000000000000000000000000000000000a03
+
+    // `transferFrom` succeeds only for `0 < amount <= balance` and `<= allowance`
+    // (throws 1/2/3); alice holds 1000 and approves exactly `amount`. Assume the
+    // balance window so the drain is over a successful spend of the allowance.
+    assume amount > 0 && amount <= 1000
+    call constructor(alice, 1000)
+    msg { sender: alice }
+    call approve(bob, amount)
+    msg { sender: bob }
+    call transferFrom(alice, carol, amount)
+
+    call balanceOf(alice)
+    expect return 1000 - amount
+    call balanceOf(carol)
+    expect return amount
+    call allowance(alice, bob)
+    expect return 0
+
+    fuzz { amount in 1..500 }
+}

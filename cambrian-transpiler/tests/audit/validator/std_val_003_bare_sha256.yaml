@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: std-val-003-bare-sha256
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - std_val_003_bare_sha256.cam

@@ -1,0 +1,38 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+property "PROP-SP-001 cross entity deploy" (amount: U256) for Spender {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    assume amount > 0 && amount <= Token.INITIAL_SUPPLY
+
+    deploy tok = Token()
+    deploy sp = Spender(tok)
+
+    call tok.constructor()
+    call sp.constructor(tok)
+    call tok.totalSupply()
+    expect return Token.INITIAL_SUPPLY
+    call sp.tokenAddr()
+    expect return tok
+}
+
+#[instantiates("PROP-SP-001")]
+property "CP-SP-001 half supply bound" (amount: U256) for Spender {
+    assume amount > 0 && amount <= Token.INITIAL_SUPPLY / 2
+}
+
+property "PROP-SP-002 foreign const only" (amount: U256) for Spender {
+    assume amount <= Token.INITIAL_SUPPLY / 4
+}
+
+property "PROP-SP-003 deploy positional init only" for Spender {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+
+    deploy tok = Token()
+    deploy sp = Spender(tok)
+
+    call tok.constructor()
+    call sp.tokenAddr()
+    expect return tok
+}

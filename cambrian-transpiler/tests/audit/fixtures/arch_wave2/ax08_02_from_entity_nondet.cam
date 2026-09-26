@@ -1,0 +1,34 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-024 / H-AX-08-02: non-det `from Token(m_token)` — EVM checks
+// `msg.sender == m_token`; Lean checks `ctx.sender == Token.address {}`.
+
+entity Token {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        ping() -> u64 => [
+            return(1)
+        ]
+    }
+}
+
+entity Vault {
+    routes {
+        #[factory_only]
+        constructor(token_addr: address) => []
+
+        onlyToken() from Token(m_token) => []
+    }
+
+    m_token: address {
+        in constructor(token_addr) => token_addr
+    }
+
+    m_hit: u64 {
+        in constructor(token_addr) => 0
+        in onlyToken() => 1
+    }
+}

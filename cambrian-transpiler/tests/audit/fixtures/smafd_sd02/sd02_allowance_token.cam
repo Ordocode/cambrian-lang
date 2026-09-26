@@ -1,0 +1,66 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// SD-02 layer B: minimal ERC20-shaped token with infinite-allowance semantics.
+
+pure fn balance_of(balances: HashMap<address, U256>, owner: address) -> U256 {
+    balances[owner]
+}
+
+pure fn allowance_of(allowances: HashMap<U256, U256>,
+                     owner: address, spender: address) -> U256 {
+    allowances[hashOf(owner, spender)]
+}
+
+pure fn spend_allowance(prev: U256, amount: U256) -> U256 {
+    if prev == U256::MAX { U256::MAX } else { prev - amount }
+}
+
+entity Sd02AllowanceToken {
+
+    const INITIAL_SUPPLY: U256 = 1000000000000000000000000
+
+    routes {
+        #[factory_only]
+        constructor(initial_holder: address) => []
+
+        approve(spender: address, amount: U256) => []
+
+        transferFrom(from_addr: address, to: address, amount: U256)
+            where balance_of(m_balances, from_addr) >= amount : throw 2 &&
+                  allowance_of(m_allowances, from_addr, msg::sender) >= amount : throw 3
+        => []
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        view allowance(owner: address, spender: address) -> U256 => [
+            return(allowance_of(m_allowances, owner, spender))
+        ]
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(initial_holder) => {
+            {}.insert(initial_holder, INITIAL_SUPPLY)
+        }
+        in transferFrom(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            m_balances
+                .update(from_addr, bal_from - amount)
+                .update(to,        bal_to   + amount)
+        }
+    }
+
+    m_allowances: HashMap<U256, U256> {
+        in approve(spender, amount) => {
+            m_allowances.update(hashOf(msg::sender, spender), amount)
+        }
+        in transferFrom(from_addr, _, amount) => {
+            let key = hashOf(from_addr, msg::sender);
+            let prev = allowance_of(m_allowances, from_addr, msg::sender);
+            m_allowances.update(key, spend_allowance(prev, amount))
+        }
+    }
+}

@@ -1,0 +1,11 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pw3-invariant-phased-value-lean
+target: lean
+output_dir: build/
+sources:
+  - phased_value_trace.cam
+
+invariant:
+  fail_on_revert: false

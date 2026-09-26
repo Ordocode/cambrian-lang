@@ -1,0 +1,7 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+test "only_effects" for E {
+    call pay(5)
+    expect effects [~> msg::sender, ..]
+}

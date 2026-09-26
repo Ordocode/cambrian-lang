@@ -1,0 +1,26 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit contract T-VAL-003b-L9: capture from a failing route without `rescue`.
+// Pattern from `lean_p3_l9_rejects_capture_from_failing_route_without_rescue`.
+
+entity Caller {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        risky() -> u64
+            where m_v == 0 : throw 7
+        => [
+            return(m_v)
+        ]
+
+        bad_capture() => [
+            var y = risky() ~> Caller.address();
+        ]
+    }
+
+    m_v: u64 {
+        in create() => 0
+    }
+}

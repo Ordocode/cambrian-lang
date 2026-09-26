@@ -1,0 +1,48 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-S-014 row 1 / PW3-O-013: multi-action invariant trace (fail / inc / tip shapes).
+
+entity TraceSweep {
+    routes {
+        #[factory_only]
+        constructor(sink: address) => []
+
+        fail(amount: u64) where amount <= m_count : throw 1 => []
+
+        inc() => []
+
+        tip(v: U256) => [
+            ~> m_sink with { value: v }
+        ]
+    }
+
+    m_sink: address {}
+
+    m_count: u64 {
+        in constructor(sink) => 0
+        in fail(amount) => m_count - amount
+        in inc() => m_count + 1
+        in tip(v) => m_count
+    }
+
+    m_tips: u64 {
+        in constructor(sink) => 0
+        in tip(v) => m_tips + 1
+    }
+}
+
+invariant "trace sweep parity" for TraceSweep {
+    init { m_count: 10, m_tips: 0 }
+
+    action fail(amount: u64) {
+        bound amount in 100..200
+    }
+    action inc() { }
+    action tip(v: U256) {
+        bound v in 1..100
+    }
+
+    check m_count >= 0
+    check trace::count(inc) + trace::count(tip) <= trace::length
+}

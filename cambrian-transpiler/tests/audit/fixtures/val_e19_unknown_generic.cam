@@ -1,0 +1,14 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-VAL-008: unknown generic type must trigger validator E19.
+
+entity X {
+    routes {
+        view get() -> u64 => [
+            return(0)
+        ]
+    }
+
+    m_box: Box<u64> {}
+}

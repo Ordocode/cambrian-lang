@@ -1,0 +1,28 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-EVM-TYPE-001 / PM-002 (MA-E01): program-scope record in member type must
+// lower to `Info public m_info`, not silent `uint256` erasure.
+
+record Info {
+    lo: U256,
+    hi: U256,
+}
+
+entity S {
+    m_a: u64 {
+        in bump(v) => m_a + v
+    }
+
+    m_info: Info {
+        in bump(v) => m_info
+    }
+
+    m_b: u64 {
+        in bump(v) => m_b + v
+    }
+
+    routes {
+        bump(v: u64) => []
+    }
+}

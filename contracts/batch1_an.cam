@@ -1,0 +1,59 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Showcase: all Batch 1 features (Acki Nacki-specific)
+
+use gosh
+
+pure fn split_pair(total: u64, parts: u64) -> (u64, u64) {
+    let (q, r) = std::math::divmod(total, parts);
+    (q as u64, r as u64)
+}
+
+entity Batch1AN {
+
+    routes {
+        constructor() => []
+
+        withdraw(to: address, amount: u64) => [
+            gosh::rawReserve(sys::balance - amount, 0)
+            ~> to with {value: 0, flags: 128}
+        ]
+
+        conditionalReserve(to: address, amount: u64) => [
+            if amount > 100 => [
+                gosh::rawReserve(amount, 2)
+            ]
+            ~> to with {value: amount}
+        ]
+
+        getBalance() -> u128 => [
+            return(sys::balance)
+        ]
+
+        calcFee(amount: u64, rate: u64, base: u64) -> u64 => [
+            return(std::math::muldiv(amount, rate, base))
+        ]
+
+        splitAmount(total: u64, parts: u64) -> (u64, u64) => [
+            return(split_pair(total, parts))
+        ]
+
+        ceilPages(bytes: u64, page_size: u64) -> u64 => [
+            return(std::math::divc(bytes, page_size))
+        ]
+
+        roundAvg(sum: u64, count: u64) -> u64 => [
+            return(std::math::divr(sum, count))
+        ]
+
+        getMin(a: u64, b: u64) -> u64 => [
+            return(std::math::min(a, b))
+        ]
+    }
+
+    m_total: u64 {
+        in constructor() => 0
+        in withdraw(_, amount) => m_total + amount
+    }
+}

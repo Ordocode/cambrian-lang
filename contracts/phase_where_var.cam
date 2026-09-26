@@ -1,0 +1,46 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Per-phase where clause: positive case.
+// A phased route has a `var` defined in phase "fetch", and the next phase
+// "act" carries a per-phase where that references that var. The transpiler
+// should accept this and emit a `require(...)` at the top of phase "act".
+
+entity Token {
+    routes {
+        #[factory_only]
+        constructor() => []
+        view balanceOf(owner: address) -> U256 => [
+            return(m_supply)
+        ]
+    }
+    m_supply: U256 {
+        in constructor() => 0
+    }
+}
+
+entity Vault {
+    routes {
+        #[factory_only]
+        constructor(token_addr: Address<Token>) => []
+
+        // Two-phase route. `bal` is captured in `fetch`; the per-phase where
+        // on `act` enforces `bal > 0` before any state change in `act`.
+        withdraw(who: address) => [
+            fetch: [
+                var bal = balanceOf(who) ~> m_token;
+            ]
+            act where bal > 0 : throw 401: [
+            ]
+        ]
+    }
+
+    m_token: Address<Token> {
+        in constructor(token_addr) => token_addr
+    }
+
+    m_last_seen: U256 {
+        in constructor() => 0
+        in withdraw(who) => act: bal
+    }
+}

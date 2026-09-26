@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-009: std::math::pow overflow — EVM checked mul reverts; Lean BitVec may wrap.
+
+entity StdPowOverflow {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        powOverflow() -> u64 => [
+            return(std::math::pow(m_base, m_exp))
+        ]
+    }
+
+    m_base: u64 {
+        in constructor() => 2
+    }
+
+    m_exp: u64 {
+        in constructor() => 64
+    }
+}

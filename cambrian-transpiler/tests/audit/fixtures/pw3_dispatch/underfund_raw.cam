@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-004 row 1: underfunded raw transfer (T-X-002 anchor — aligned baseline).
+
+entity Wallet {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        sendTooMuch(recipient: address) => [
+            ~> recipient with { value: 1000 }
+        ]
+
+        getBalance() -> u128 => [
+            return(m_balance)
+        ]
+    }
+
+    m_balance: u128 {
+        in constructor() => 100
+    }
+}

@@ -1,0 +1,16 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-023 / H-AX-03-05: bare `throw` must keep route fail-mode; Lean must not
+// emit `-- throw N (skipped: route inferred non-failing)`.
+
+entity ThrowProbe {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        bail() => [
+            throw 42
+        ]
+    }
+}

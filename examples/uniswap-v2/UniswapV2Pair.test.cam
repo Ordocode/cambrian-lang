@@ -1,0 +1,295 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Unit tests for UniswapV2Pair.
+//
+// Every state-changing route on the pair reads its counterparty
+// balances off `m_token0` / `m_token1` (`balanceOf(sys::address) ~>
+// m_token0`), so none of them could be reached from a suite that can
+// only ever drive one instance. With `deploy` (G-U9) a test can stand
+// up two real ERC20s and a pair wired against them, which is what the
+// mint / burn / swap / sync / skim flows below do.
+//
+// Amounts are chosen so the initial `sqrt(bal0 * bal1)` clears
+// MINIMUM_LIQUIDITY (1000) with room to spare: 4_000_000 * 1_000_000
+// gives sqrt = 2_000_000, so the first mint issues 1_999_000 LP.
+
+test "fresh pair has zero reserves and zero supply" for UniswapV2Pair {
+    call constructor()
+
+    call totalSupply()
+    expect return 0
+    call kLast()
+    expect return 0
+}
+
+test "fresh pair has zero cumulative prices" for UniswapV2Pair {
+    call constructor()
+
+    call price0CumulativeLast()
+    expect return 0
+    call price1CumulativeLast()
+    expect return 0
+}
+
+test "constructor wires both token identities" for UniswapV2Pair {
+    deploy t0 = ERC20(sys::address, 1000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 1000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    call token0()
+    expect return t0
+    call token1()
+    expect return t1
+}
+
+// ---------------------------------------------------------------------
+// mint
+// ---------------------------------------------------------------------
+
+test "first mint issues sqrt(k) minus the minimum liquidity" for UniswapV2Pair {
+    let lp = 0x0000000000000000000000000000000000000000000000000000000000000b0b
+
+    deploy t0 = ERC20(sys::address, 10000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 10000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    call t0.transfer(pair, 4000000)
+    call t1.transfer(pair, 1000000)
+    call mint(lp)
+
+    // sqrt(4_000_000 * 1_000_000) - 1000 = 2_000_000 - 1000.
+    call totalSupply()
+    expect return 1999000
+    call balanceOf(lp)
+    expect return 1999000
+    expect state { m_reserve0: 4000000, m_reserve1: 1000000 }
+    call kLast()
+    expect return 4000000000000
+}
+
+test "second mint is proportional to the deposit" for UniswapV2Pair {
+    let lp = 0x0000000000000000000000000000000000000000000000000000000000000b0b
+
+    deploy t0 = ERC20(sys::address, 20000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 20000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    call t0.transfer(pair, 4000000)
+    call t1.transfer(pair, 1000000)
+    call mint(lp)
+
+    // Doubling both sides doubles the outstanding LP.
+    call t0.transfer(pair, 4000000)
+    call t1.transfer(pair, 1000000)
+    call mint(lp)
+
+    call totalSupply()
+    expect return 3998000
+    call balanceOf(lp)
+    expect return 3998000
+    expect state { m_reserve0: 8000000, m_reserve1: 2000000 }
+}
+
+test "mint with no deposit throws 100" for UniswapV2Pair {
+    let lp = 0x0000000000000000000000000000000000000000000000000000000000000b0b
+
+    deploy t0 = ERC20(sys::address, 1000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 1000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    call mint(lp)
+    expect throw 100
+}
+
+test "mint with a one-sided deposit throws 100" for UniswapV2Pair {
+    let lp = 0x0000000000000000000000000000000000000000000000000000000000000b0b
+
+    deploy t0 = ERC20(sys::address, 10000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 10000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    call t0.transfer(pair, 4000000)
+    call mint(lp)
+    expect throw 100
+}
+
+// ---------------------------------------------------------------------
+// burn
+// ---------------------------------------------------------------------
+
+// The pair has no LP `transfer` route: `burn` redeems whatever LP the
+// pair itself holds, which is OZ's "send your LP to the pair, then
+// call burn" flow with the send folded into the mint recipient.
+test "burn redeems the pair's own LP for both sides" for UniswapV2Pair {
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b0b
+
+    deploy t0 = ERC20(sys::address, 10000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 10000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    call t0.transfer(pair, 4000000)
+    call t1.transfer(pair, 1000000)
+    call mint(pair)
+
+    call burn(bob)
+
+    // The pair held every outstanding LP token, so the burn drains it.
+    call totalSupply()
+    expect return 0
+    call balanceOf(pair)
+    expect return 0
+    expect state { m_reserve0: 0, m_reserve1: 0 }
+
+    call t0.balanceOf(bob)
+    expect return 4000000
+    call t1.balanceOf(bob)
+    expect return 1000000
+}
+
+test "burn without LP throws 110" for UniswapV2Pair {
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b0b
+
+    deploy t0 = ERC20(sys::address, 10000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 10000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    call t0.transfer(pair, 4000000)
+    call t1.transfer(pair, 1000000)
+    call mint(bob)
+
+    // The LP went to bob, not to the pair, so there is nothing to redeem.
+    call burn(bob)
+    expect throw 110
+}
+
+// ---------------------------------------------------------------------
+// swap
+// ---------------------------------------------------------------------
+
+test "swap pays out against a sufficient input" for UniswapV2Pair {
+    let lp  = 0x0000000000000000000000000000000000000000000000000000000000000b0b
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b02
+    let data = b""
+
+    deploy t0 = ERC20(sys::address, 10000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 10000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    call t0.transfer(pair, 4000000)
+    call t1.transfer(pair, 1000000)
+    call mint(lp)
+
+    // Buy 1000 of token1. Against reserves 4_000_000 / 1_000_000 the
+    // constant-product bound with the 0.3% fee needs a little over
+    // 4004 of token0 in; 4100 clears it. Both output legs are non-zero
+    // because this example's ERC20 rejects zero-amount transfers, and
+    // `swap` pays out optimistically on both sides before checking K.
+    call t0.transfer(pair, 4100)
+    call swap(1, 1000, bob, data)
+
+    call t0.balanceOf(bob)
+    expect return 1
+    call t1.balanceOf(bob)
+    expect return 1000
+    expect state { m_reserve0: 4004099, m_reserve1: 999000 }
+}
+
+test "swap without paying in throws 203" for UniswapV2Pair {
+    let lp  = 0x0000000000000000000000000000000000000000000000000000000000000b0b
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b02
+    let data = b""
+
+    deploy t0 = ERC20(sys::address, 10000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 10000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    call t0.transfer(pair, 4000000)
+    call t1.transfer(pair, 1000000)
+    call mint(lp)
+
+    // Taking token1 out without sending token0 in breaks K.
+    call swap(1, 1000, bob, data)
+    expect throw 203
+}
+
+test "swap with both outputs zero throws 200" for UniswapV2Pair {
+    let to = 0x0000000000000000000000000000000000000000000000000000000000000c01
+    let data = b""
+
+    call constructor()
+    call swap(0, 0, to, data)
+    expect throw 200
+}
+
+test "swap above reserve0 throws 201" for UniswapV2Pair {
+    // Reserves are zero on a fresh pair, so any positive amount0_out
+    // immediately fails the `amount0_out < m_reserve0` guard.
+    let to = 0x0000000000000000000000000000000000000000000000000000000000000c01
+    let data = b""
+
+    call constructor()
+    call swap(1, 0, to, data)
+    expect throw 201
+}
+
+test "swap above reserve1 throws 202" for UniswapV2Pair {
+    let lp  = 0x0000000000000000000000000000000000000000000000000000000000000b0b
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b02
+    let data = b""
+
+    deploy t0 = ERC20(sys::address, 10000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 10000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    call t0.transfer(pair, 4000000)
+    call t1.transfer(pair, 1000000)
+    call mint(lp)
+
+    // Guard 201 passes (1 < reserve0), so the reserve1 guard is the one
+    // that fires.
+    call swap(1, 1000000, bob, data)
+    expect throw 202
+}
+
+// ---------------------------------------------------------------------
+// sync / skim
+// ---------------------------------------------------------------------
+
+test "sync adopts a donated balance as reserves" for UniswapV2Pair {
+    deploy t0 = ERC20(sys::address, 10000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 10000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    // Tokens arrive without a mint, so the reserves are stale at zero.
+    call t0.transfer(pair, 4000000)
+    call t1.transfer(pair, 1000000)
+    expect state { m_reserve0: 0, m_reserve1: 0 }
+
+    call sync()
+    expect state { m_reserve0: 4000000, m_reserve1: 1000000 }
+}
+
+test "skim sweeps the surplus and leaves reserves alone" for UniswapV2Pair {
+    let lp  = 0x0000000000000000000000000000000000000000000000000000000000000b0b
+    let bob = 0x0000000000000000000000000000000000000000000000000000000000000b02
+
+    deploy t0 = ERC20(sys::address, 10000000) with { m_token_id: 0 }
+    deploy t1 = ERC20(sys::address, 10000000) with { m_token_id: 1 }
+    deploy pair = UniswapV2Pair() with { m_token0: t0, m_token1: t1 }
+
+    call t0.transfer(pair, 4000000)
+    call t1.transfer(pair, 1000000)
+    call mint(lp)
+
+    // Donate on top of the accounted reserves, then reclaim it.
+    call t0.transfer(pair, 7000)
+    call t1.transfer(pair, 3000)
+    call skim(bob)
+
+    call t0.balanceOf(bob)
+    expect return 7000
+    call t1.balanceOf(bob)
+    expect return 3000
+    expect state { m_reserve0: 4000000, m_reserve1: 1000000 }
+}

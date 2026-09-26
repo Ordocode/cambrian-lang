@@ -1,0 +1,422 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Unit tests for the uRWA accounting layer: one per scenario of
+// `product/stdlib/bls/erc7943.md`, plus the holder-count lifecycle.
+//
+// The permission scenarios are not repeated here. They live in
+// `ERC7943Min.test.cam` and hold for this entity by P0-1; duplicating them
+// would double the maintenance and halve the signal when one goes red.
+// What this file tests is the part that needs the base's arithmetic: exact
+// amounts, the frozen/unfrozen split, and the holder count.
+
+// ── S01: freeze part of one balance ─────────────────────────────────────
+
+test "a partial freeze splits the balance exactly" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 400)
+
+    call getFrozenTokens(alice)
+    expect return 400
+    call unfrozenTokens(alice)
+    expect return 600
+    call balanceOf(alice)
+    expect return 1000
+    call totalSupply()
+    expect return 1000
+}
+
+// ── S02: a transfer at or below the unfrozen amount ─────────────────────
+
+test "a transfer within the unfrozen part moves exactly the amount" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 400)
+
+    msg { sender: alice }
+    call transfer(bob, 600)
+
+    call balanceOf(alice)
+    expect return 400
+    call balanceOf(bob)
+    expect return 600
+    call getFrozenTokens(alice)
+    expect return 400
+    call unfrozenTokens(alice)
+    expect return 0
+    call totalSupply()
+    expect return 1000
+}
+
+// ── S03: a transfer above the unfrozen amount reverts ───────────────────
+
+test "a transfer one above the unfrozen part reverts and moves nothing" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 400)
+
+    msg { sender: alice }
+    call transfer(bob, 601)
+    expect throw 10
+
+    call balanceOf(alice)
+    expect return 1000
+    call balanceOf(bob)
+    expect return 0
+    call getFrozenTokens(alice)
+    expect return 400
+}
+
+test "a spender is bound by the holder unfrozen part" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 400)
+
+    msg { sender: alice }
+    call approve(bob, 1000)
+
+    msg { sender: bob }
+    call transferFrom(alice, bob, 601)
+    expect throw 10
+
+    msg { sender: bob }
+    call transferFrom(alice, bob, 600)
+
+    call balanceOf(bob)
+    expect return 600
+}
+
+// ── S04: a seizure within the unfrozen part ─────────────────────────────
+
+test "a seizure within the unfrozen part leaves the freeze alone" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 400)
+    msg { sender: op }
+    call forcedTransfer(alice, bob, 600)
+
+    call balanceOf(alice)
+    expect return 400
+    call balanceOf(bob)
+    expect return 600
+    call getFrozenTokens(alice)
+    expect return 400
+    call totalSupply()
+    expect return 1000
+}
+
+// ── S05: a seizure reaching into the frozen part ────────────────────────
+//
+// The scenario the whole accounting layer turns on, and the one that pins an
+// ordering the toolchain does not otherwise guarantee. The frozen clamp lives
+// in a different member transform from the balance write, and mapping
+// transforms commit to storage in place rather than at the end of the route —
+// so the clamp is correct only while it is emitted before the balance write
+// and therefore reads the pre-call balance. If that order ever flips, this
+// test reports 250 instead of 300 and says so before anything downstream
+// silently computes a wrong unfrozen amount.
+
+test "a seizure into the frozen part lowers the freeze to what remains" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 900)
+
+    // 700 is above the unfrozen 100, so the seizure takes 600 of the freeze.
+    msg { sender: op }
+    call forcedTransfer(alice, bob, 700)
+
+    call balanceOf(alice)
+    expect return 300
+    call balanceOf(bob)
+    expect return 700
+    call getFrozenTokens(alice)
+    expect return 300
+    call unfrozenTokens(alice)
+    expect return 0
+    call totalSupply()
+    expect return 1000
+}
+
+test "a seizure of the whole balance clears the freeze" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 1000)
+    msg { sender: op }
+    call forcedTransfer(alice, bob, 1000)
+
+    call balanceOf(alice)
+    expect return 0
+    call getFrozenTokens(alice)
+    expect return 0
+    call holderCount()
+    expect return 1
+}
+
+// ── S06: the holder count ───────────────────────────────────────────────
+
+test "the holder count follows the nonzero balances" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol = 0x0000000000000000000000000000000000000000000000000000000000000a03
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    call holderCount()
+    expect return 1
+
+    // A partial transfer to a fresh address adds one holder.
+    msg { sender: alice }
+    call transfer(bob, 400)
+    call holderCount()
+    expect return 2
+
+    // Topping up an existing holder adds none.
+    msg { sender: alice }
+    call transfer(bob, 100)
+    call holderCount()
+    expect return 2
+
+    // Emptying an account into a fresh one is a wash.
+    msg { sender: alice }
+    call transfer(carol, 500)
+    call holderCount()
+    expect return 2
+
+    // Emptying an account into an existing holder loses one.
+    msg { sender: carol }
+    call transfer(bob, 500)
+    call holderCount()
+    expect return 1
+
+    call balanceOf(bob)
+    expect return 1000
+}
+
+test "minting and burning move the holder count" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+
+    msg { sender: op }
+    call mint(bob, 50)
+    call holderCount()
+    expect return 2
+
+    msg { sender: op }
+    call mint(bob, 50)
+    call holderCount()
+    expect return 2
+
+    msg { sender: bob }
+    call burn(100)
+    call holderCount()
+    expect return 1
+    call totalSupply()
+    expect return 1000
+}
+
+test "a token with no opening supply has no holders" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 0)
+    call holderCount()
+    expect return 0
+}
+
+// ── S08: a seizure to the zero address ──────────────────────────────────
+
+test "a seizure to the zero address reverts" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    msg { sender: op }
+    call forcedTransfer(alice, 0x0000000000000000000000000000000000000000000000000000000000000000, 100)
+    expect throw 7
+
+    call balanceOf(alice)
+    expect return 1000
+    call totalSupply()
+    expect return 1000
+    call holderCount()
+    expect return 1
+}
+
+// ── S09: a seizure to the sender ────────────────────────────────────────
+
+test "a seizure to the same address changes nothing" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 400)
+    msg { sender: op }
+    call forcedTransfer(alice, alice, 700)
+
+    call balanceOf(alice)
+    expect return 1000
+    call totalSupply()
+    expect return 1000
+    call holderCount()
+    expect return 1
+    call getFrozenTokens(alice)
+    expect return 400
+}
+
+// ── S10: a freeze above the balance ─────────────────────────────────────
+
+test "a freeze above the balance saturates and survives a top-up" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    msg { sender: alice }
+    call transfer(bob, 900)
+
+    msg { sender: op }
+    call setFrozenTokens(bob, 2000)
+
+    call getFrozenTokens(bob)
+    expect return 2000
+    call unfrozenTokens(bob)
+    expect return 0
+
+    msg { sender: alice }
+    call transfer(bob, 100)
+
+    call balanceOf(bob)
+    expect return 1000
+    call getFrozenTokens(bob)
+    expect return 2000
+    call unfrozenTokens(bob)
+    expect return 0
+}
+
+// ── P1-3 / P1-4: burn ───────────────────────────────────────────────────
+
+test "a burn takes the amount from the balance and the emission alone" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+    msg { sender: op }
+    call setFrozenTokens(alice, 400)
+
+    msg { sender: alice }
+    call burn(600)
+
+    call balanceOf(alice)
+    expect return 400
+    call totalSupply()
+    expect return 400
+    call getFrozenTokens(alice)
+    expect return 400
+    call unfrozenTokens(alice)
+    expect return 0
+}
+
+// ── The base still behaves like `erc20` ─────────────────────────────────
+
+test "the metadata and the permit domain survive the rule layer" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+
+    call name()
+    expect return "uRWA Token"
+    call symbol()
+    expect return "URWA"
+    call decimals()
+    expect return 18
+    call operator()
+    expect return op
+    call nonces(alice)
+    expect return 0
+}
+
+// ERC-165, and the ABI claim it makes.
+//
+// `0x3edbb4c4` is the XOR of the six fungible-interface selectors the EIP
+// lists. Asserting it here is not ceremony: the id is derived from argument
+// lists, so renaming a parameter type on any of the six routes silently moves
+// it, and a consumer that trusted the answer would call a function that no
+// longer exists. This test turns that into a build failure.
+//
+// The negative case matters as much: a route that answers `true` to every id
+// passes the positive assertion and tells a caller nothing.
+test "the entity answers for the interfaces it implements" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+
+    call supportsInterface(0x01ffc9a7)
+    expect return true
+    call supportsInterface(0x3edbb4c4)
+    expect return true
+    call supportsInterface(0xffffffff)
+    expect return false
+    call supportsInterface(0xdeadbeef)
+    expect return false
+}
+
+// The rule routes the EIP declares as `returns (bool)`.
+test "the rule routes answer true" for ERC7943 {
+    let op    = 0x0000000000000000000000000000000000000000000000000000000000000b01
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    call constructor("uRWA Token", "URWA", 18, op, alice, 1000)
+
+    msg { sender: op }
+    call setFrozenTokens(alice, 100)
+    expect return true
+
+    msg { sender: op }
+    call forcedTransfer(alice, bob, 50)
+    expect return true
+
+    msg { sender: alice }
+    call transfer(bob, 10)
+    expect return true
+
+    msg { sender: alice }
+    call approve(bob, 10)
+    expect return true
+
+    msg { sender: bob }
+    call transferFrom(alice, bob, 10)
+    expect return true
+}

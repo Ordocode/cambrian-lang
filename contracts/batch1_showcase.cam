@@ -1,0 +1,27 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Showcase: Batch 1 stdlib features (container-compatible subset)
+
+entity Batch1 {
+
+    routes {
+        constructor() => []
+
+        getMin(a: u64, b: u64) -> u64 => [
+            return(std::math::min(a, b))
+        ]
+
+        getMax(a: u64, b: u64) -> u64 => [
+            return(std::math::max(a, b))
+        ]
+
+        getClamped(x: u64, lo: u64, hi: u64) -> u64 => [
+            return(std::math::clamp(x, lo, hi))
+        ]
+    }
+
+    m_total: u64 {
+        in constructor() => 0
+    }
+}

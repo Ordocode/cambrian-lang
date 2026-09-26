@@ -1,0 +1,35 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+test "increment adds to count" for Counter with { m_count: 5 } {
+    call increment(3)
+    expect state { m_count: 8 }
+}
+
+test "reset zeroes count" for Counter with { m_count: 42 } {
+    call reset()
+    expect state { m_count: 0 }
+}
+
+test "getCount returns current" for Counter with { m_count: 99 } {
+    call getCount()
+    expect return 99
+}
+
+test "default state starts at zero" for Counter {
+    call getCount()
+    expect return 0
+}
+
+test "increment has no effects" for Counter with { m_count: 0 } {
+    call increment(5)
+    expect effects []
+}
+
+test "multi-step increment" for Counter with { m_count: 0 } {
+    call increment(10)
+    expect state { m_count: 10 }
+
+    call increment(5)
+    expect state { m_count: 15 }
+}

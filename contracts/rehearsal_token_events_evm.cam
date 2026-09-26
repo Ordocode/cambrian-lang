@@ -1,0 +1,109 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// SD-03 / SMAFD BLS §9 reference corpus (Run #5 RehearsalToken observability surface).
+// Member-centric state + explicit `emit` in route bodies (CPE harness does not synthesize logs).
+
+pure fn balance_of(balances: HashMap<address, U256>, owner: address) -> U256 {
+    if balances.exists(owner) { balances[owner] } else { 0 }
+}
+
+entity RehearsalTokenEvents {
+    const ZERO: address = 0x0000000000000000000000000000000000000000
+    const CLAIM_AMOUNT: U256 = 100
+
+    event Transfer(indexed src: address, indexed dst: address, value: U256);
+    event Approval(indexed owner: address, indexed spender: address, value: U256);
+    event Whitelisted(indexed account: address, status: bool);
+    event Claimed(indexed participant: address, amount: U256);
+
+    routes {
+        constructor(holder: address, initial_supply: U256) => [
+            emit Transfer(ZERO, holder, initial_supply);
+        ]
+
+        transfer(to: address, amount: U256) => [
+            emit Transfer(msg::sender, to, amount);
+        ]
+
+        approve(spender: address, amount: U256) => [
+            emit Approval(msg::sender, spender, amount);
+        ]
+
+        burn(amount: U256)
+            where balance_of(m_balances, msg::sender) >= amount : throw 2
+            => [
+                emit Transfer(msg::sender, ZERO, amount);
+            ]
+
+        setWhitelisted(account: address, status: bool) => [
+            emit Whitelisted(account, status);
+        ]
+
+        claim()
+            where m_whitelisted.exists(msg::sender) && m_whitelisted[msg::sender] : throw 3 &&
+                  balance_of(m_balances, m_treasury) >= CLAIM_AMOUNT : throw 4
+            => [
+                emit Claimed(msg::sender, CLAIM_AMOUNT);
+                emit Transfer(m_treasury, msg::sender, CLAIM_AMOUNT);
+            ]
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        view totalSupply() -> U256 => [
+            return(m_total_supply)
+        ]
+    }
+
+    m_treasury: address {
+        in constructor(holder, initial_supply) => holder
+    }
+
+    m_total_supply: U256 {
+        in constructor(holder, initial_supply) => initial_supply
+        in burn(amount) => m_total_supply - amount
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(holder, initial_supply) => {
+            {}.insert(holder, initial_supply)
+        }
+        in transfer(to, amount) => {
+            let sender = msg::sender;
+            let sender_bal = balance_of(m_balances, sender);
+            let to_bal = balance_of(m_balances, to);
+            m_balances
+                .update(sender, sender_bal - amount)
+                .update(to, to_bal + amount)
+        }
+        in burn(amount) => {
+            let sender = msg::sender;
+            let sender_bal = balance_of(m_balances, sender);
+            m_balances.update(sender, sender_bal - amount)
+        }
+        in claim() => {
+            let sender = msg::sender;
+            let treasury_bal = balance_of(m_balances, m_treasury);
+            let sender_bal = balance_of(m_balances, sender);
+            m_balances
+                .update(m_treasury, treasury_bal - CLAIM_AMOUNT)
+                .update(sender, sender_bal + CLAIM_AMOUNT)
+        }
+    }
+
+    m_allowances: HashMap<address, U256> {
+        in approve(spender, amount) => m_allowances.update(spender, amount)
+    }
+
+    m_whitelisted: HashMap<address, bool> {
+        in setWhitelisted(account, status) => m_whitelisted.update(account, status)
+    }
+}
+
+test "sd03 expect emit self transfer zero" for RehearsalTokenEvents {
+    expect emit Transfer(ZERO, ZERO, 0)
+    msg { sender: ZERO }
+    call transfer(ZERO, 0)
+}

@@ -1,0 +1,40 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Lean fixture: route-body `call <route>(args)` — a synchronous,
+// same-instance invocation of one of this entity's own (usually
+// private) routes. Exercises both a total callee (`bump`) and a
+// failing callee (`checkedBump`, reached from a failing caller).
+
+entity Accum {
+    routes {
+        init create() => []
+
+        // Public route that synchronously invokes a private helper twice.
+        // The two calls accumulate on the same instance state.
+        bumpTwice(amount: u64) => [
+            call bump(amount)
+            call bump(amount)
+        ]
+
+        private bump(amount: u64) => []
+
+        // Failing caller invoking a failing private helper: the callee's
+        // failure must propagate synchronously.
+        guardedBump(amount: u64)
+            where amount > 0 : throw 1
+        => [
+            call checkedBump(amount)
+        ]
+
+        private checkedBump(amount: u64)
+            where amount < 1000 : throw 2
+        => []
+    }
+
+    m_count: u64 {
+        in create() => 0
+        in bump(amount) => m_count + amount
+        in checkedBump(amount) => m_count + amount
+    }
+}

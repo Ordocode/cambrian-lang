@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-009: std::math::abs(i64::MIN) — EVM negation overflow vs Lean wrap.
+
+pure fn i64_min() -> i64 {
+    (-9223372036854775807 as i64) - 1
+}
+
+entity StdAbsI64Min {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        absMin() -> i64 => [
+            return(std::math::abs(m_x))
+        ]
+    }
+
+    m_x: i64 {
+        in constructor() => i64_min()
+    }
+}

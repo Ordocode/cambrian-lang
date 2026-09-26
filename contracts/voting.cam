@@ -1,0 +1,120 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Voting / DAO governance contract in Cambrian
+// Exercises: records with many fields, temporal refs across members,
+//            time-based where clauses, boolean flags, record construction,
+//            multiple view routes returning different types
+
+pure fn has_voted(votes: HashMap<address, bool>, voter: address) -> bool {
+    votes.exists(voter)
+}
+
+pure fn is_active(end_time: u64, executed: bool, now: u64) -> bool {
+    if executed { false } else { now <= end_time }
+}
+
+pure fn tally_passed(yes_votes: u64, no_votes: u64) -> bool {
+    yes_votes > no_votes
+}
+
+entity Voting {
+
+    record Proposal {
+        id: u64,
+        creator: address,
+        description: String,
+        yes_votes: u64,
+        no_votes: u64,
+        created_at: u64,
+        end_time: u64,
+        executed: bool
+    }
+
+    const ERROR_NOT_ACTIVE: u8 = 1
+    const ERROR_ALREADY_VOTED: u8 = 2
+    const ERROR_NOT_FOUND: u8 = 3
+    const ERROR_STILL_ACTIVE: u8 = 4
+    const ERROR_ALREADY_EXECUTED: u8 = 5
+    const ERROR_NOT_PASSED: u8 = 6
+
+    routes {
+        constructor(quorum: u64, voting_period: u64) => []
+
+        createProposal(description: String) => []
+
+        vote(proposal_id: u64, support: bool)
+            where m_proposals.exists(proposal_id) : throw 3 &&
+                  is_active(m_proposals[proposal_id].end_time, m_proposals[proposal_id].executed, msg::timestamp) : throw 1 &&
+                  !has_voted(m_vote_records, msg::sender) : throw 2 => []
+
+        executeProposal(proposal_id: u64)
+            where m_proposals.exists(proposal_id) : throw 3 &&
+                  !m_proposals[proposal_id].executed : throw 5 &&
+                  msg::timestamp > m_proposals[proposal_id].end_time : throw 4 &&
+                  tally_passed(m_proposals[proposal_id].yes_votes, m_proposals[proposal_id].no_votes) : throw 6 &&
+                  m_proposals[proposal_id].yes_votes >= m_quorum : throw 6 => [
+                ~> msg::sender
+            ]
+
+        getProposal(proposal_id: u64) -> (u64, address, u64, u64, bool)
+            where m_proposals.exists(proposal_id) : throw 3 => [
+            let p = m_proposals[proposal_id];
+            return(p.id, p.creator, p.yes_votes, p.no_votes, p.executed)
+        ]
+
+        getProposalCount() -> u64 => [
+            return(m_proposal_count)
+        ]
+    }
+
+    m_quorum: u64 {
+        in constructor(quorum, _) => quorum
+    }
+
+    m_voting_period: u64 {
+        in constructor(_, voting_period) => voting_period
+    }
+
+    m_proposal_count: u64 {
+        in constructor(_, _) => 0
+        in createProposal(_) => m_proposal_count + 1
+    }
+
+    m_proposals: HashMap<u64, Proposal> {
+        in createProposal(description) => {
+            let id = m_proposal_count;
+            let proposal = Proposal {
+                id: id,
+                creator: msg::sender,
+                description: description,
+                yes_votes: 0,
+                no_votes: 0,
+                created_at: msg::timestamp,
+                end_time: msg::timestamp + m_voting_period,
+                executed: false
+            };
+            m_proposals.insert(id, proposal)
+        }
+        in vote(proposal_id, support) => {
+            let p = m_proposals[proposal_id];
+            let updated = if support {
+                p { yes_votes: p.yes_votes + 1 }
+            } else {
+                p { no_votes: p.no_votes + 1 }
+            };
+            m_proposals.update(proposal_id, updated)
+        }
+        in executeProposal(proposal_id) => {
+            let p = m_proposals[proposal_id];
+            let done = p { executed: true };
+            m_proposals.update(proposal_id, done)
+        }
+    }
+
+    m_vote_records: HashMap<address, bool> {
+        in vote(_, _) => {
+            m_vote_records.insert(msg::sender, true)
+        }
+    }
+}

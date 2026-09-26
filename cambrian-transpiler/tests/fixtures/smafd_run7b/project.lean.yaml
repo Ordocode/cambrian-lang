@@ -1,0 +1,10 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Run #7b-shaped RHT fixture — nullary constructor + sumBalances + CP-002 overlay.
+target: lean
+output_dir: build-lean/
+sources:
+  - cambrian-contracts/RehearsalToken.cam
+  - docs/cambrian-spec/RehearsalToken.properties.cam
+  - cambrian-contracts/RehearsalToken.invariant.cam

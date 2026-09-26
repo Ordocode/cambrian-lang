@@ -1,0 +1,13 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// CP-004 — genesis-only invariant from constructor mint (qa-plan §3.3 optional).
+// Run #9 migration (PL-F-INV-04): explicit deploy separates setup from trace senders.
+
+invariant "CP-004 ctor mint only supply cap" #[instantiates("INV-TCORE-001")] for TokenCore {
+    deploy {
+        0x0000000000000000000000000000000000000000000000000000000000000d01
+    }
+
+    check totalSupply() == 1000000000000000000000000
+}

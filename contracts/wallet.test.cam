@@ -1,0 +1,20 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Wallet — rawReserve + send with wildcards
+
+test "withdraw produces rawReserve and send" for Wallet with { m_balance: 1000 } {
+    let dest = 0x0000000000000000000000000000000000000000000000000000000000001234
+    sys { balance: 5000 }
+    call withdraw(dest, 300)
+    expect state { m_balance: 700 }
+    expect effects [.., rawReserve(4700, 0), .., ~> dest]
+}
+
+test "withdraw full balance" for Wallet with { m_balance: 500 } {
+    let dest = 0x0000000000000000000000000000000000000000000000000000000000001234
+    sys { balance: 500 }
+    call withdraw(dest, 500)
+    expect state { m_balance: 0 }
+    expect effects [.., rawReserve(0, 0), .., ~> dest]
+}

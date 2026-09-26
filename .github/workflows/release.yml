@@ -1,0 +1,258 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Public-tree CI + release workflow (ships via release/overlay; the private
+# .github/ is export-ignore'd and never reaches the public repository).
+#
+# Test jobs mirror the private `test-public-tree*` GitLab family (see
+# .gitlab-ci.yml in the private repository) — keep the two in sync. In the
+# public repository the checkout already is the public tree, so there is no
+# staging step; the jobs run the same cargo commands directly:
+#   test           ↔ test-public-tree            (check + core + full transpiler suite)
+#   coverage-smoke ↔ test-public-tree-coverage-smoke
+#   lean-build     ↔ test-public-tree-lean-build (lake gates; no forge, as on GitLab)
+#   phase-o        ↔ test-public-tree-phase-o    (lake + forge matrices)
+#   stdlib         ↔ test-public-tree-stdlib     (token/vault forge + ABI + mutants + lake)
+#
+# publish-public-tree.sh pushes every snapshot to `main` together with a
+# `v<version>` tag; the tag run additionally builds the cambrian-transpiler
+# CLI for the common desktop platforms and attaches the archives to a GitHub
+# release of the same tag. The build/release jobs `need` every test job, so
+# binaries only publish when the tests pass on the published tree.
+name: ci
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  pull_request:
+  # Manual escape hatch: dispatching on a `v*` tag ref reruns the tests and,
+  # because the ref is a tag, also builds and releases the binaries (useful
+  # when a tag push failed to trigger its run).
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned toolchains — mirror FOUNDRY_VERSION / LEAN_TOOLCHAIN in the
+  # private .gitlab-ci.yml; bump deliberately, together.
+  FOUNDRY_VERSION: v1.7.1
+  LEAN_TOOLCHAIN: leanprover/lean4:v4.29.1
+
+jobs:
+  # Mirror of test-public-tree: workspace check, cambrian-core, and the full
+  # cambrian-transpiler suite (forge-backed tests included).
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+      - run: cargo check --workspace
+      - run: cargo test -p cambrian-core
+      - run: cargo build -p cambrian-transpiler
+      - run: cargo test -p cambrian-transpiler --no-fail-fast
+
+  # Mirror of test-public-tree-coverage-smoke (forge oracle subset).
+  coverage-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CAMBRIAN_TEST_COVERAGE_FORGE: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+      - run: cargo build -p cambrian-transpiler
+      - run: cargo test -p cambrian-transpiler --test test_audit_coverage_validate -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_coverage_ir -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_coverage_analysis -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_coverage_codegen pw3_o009 -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_phase_n pw3_o009 -- --nocapture
+
+  # Mirror of test-public-tree-lean-build: real `lake build` smoke gates.
+  # No forge here, matching the GitLab job (lean-image only).
+  lean-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CAMBRIAN_TEST_LEAN_BUILD: "1"
+      CAMBRIAN_TEST_P8_EXEC_GATE: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: Install elan (Lean)
+        run: |
+          curl -sSf https://elan.lean-lang.org/elan-init.sh \
+            | sh -s -- -y --default-toolchain "$LEAN_TOOLCHAIN"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - run: lake --version
+      - run: cargo build -p cambrian-transpiler
+      - run: cargo test -p cambrian-transpiler --test test_std_lean -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_codegen_lean -- lake_build_smoke
+      - run: cargo test -p cambrian-transpiler --test test_codegen_lean_props -- lake_build_smoke
+      - run: cargo test -p cambrian-transpiler --test test_codegen_lean_world -- lake_build_smoke
+      - run: cargo test -p cambrian-transpiler --test test_lean_matrix -- lake_builds
+      - run: cargo test -p cambrian-transpiler --test test_audit_validator audit_val_003 -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_validator audit_val_003b_l8 -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_validator audit_val_003b_l9 -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_validator audit_val_003b_l10 -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_validator audit_val_003b_l12 -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_lean audit_lean_t_lean_010 -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_lean audit_lean_h4 -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_lean_expr audit_lean_expr_matrix_lake_build -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_differential -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_audit_lean_specs -- --nocapture
+      # Env-gated lake legs (CAMBRIAN_TEST_LEAN_BUILD / P8 exec gate).
+      - run: cargo test -p cambrian-transpiler --test test_audit_phase_m -- --nocapture
+      - run: cargo test -p cambrian-transpiler --test test_domain_fixture_exec -- --nocapture
+
+  # Mirror of test-public-tree-phase-o: wave-3 matrices, lake + forge.
+  # Continues after a failing binary so later matrices still run.
+  phase-o:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CAMBRIAN_TEST_LEAN_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+      - name: Install elan (Lean)
+        run: |
+          curl -sSf https://elan.lean-lang.org/elan-init.sh \
+            | sh -s -- -y --default-toolchain "$LEAN_TOOLCHAIN"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - run: lake --version
+      - run: cargo build -p cambrian-transpiler
+      - name: Phase O matrices
+        run: |
+          set +e
+          status=0
+          run() {
+            cargo test --no-fail-fast -p cambrian-transpiler --test "$1" ${2:+"$2"} -- --nocapture --test-threads=1 || status=1
+          }
+          run test_audit_layout_matrix
+          run test_audit_arith_matrix
+          run test_audit_deploy_matrix pw3_g002
+          run test_audit_type_fuzz
+          run test_audit_stdlib_matrix
+          run test_audit_p7_admit_matrix
+          run test_audit_dispatch_matrix
+          run test_audit_scaling_matrix
+          run test_audit_invariant_matrix
+          run test_audit_iter_matrix
+          cargo test --no-fail-fast -p cambrian-transpiler --test test_audit_differential -- --nocapture --test-threads=1 || status=1
+          cargo test --no-fail-fast -p cambrian-transpiler --test test_audit_fuzz audit_fuzz_iterator -- --nocapture || status=1
+          exit $status
+
+  # Mirror of test-public-tree-stdlib: shipped token + vault suites.
+  stdlib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CAMBRIAN_TEST_STDLIB: "1"
+      CAMBRIAN_TEST_LEAN_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+      - name: Install elan (Lean)
+        run: |
+          curl -sSf https://elan.lean-lang.org/elan-init.sh \
+            | sh -s -- -y --default-toolchain "$LEAN_TOOLCHAIN"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - run: lake --version
+      - run: cargo build --release -p cambrian-transpiler
+      - run: cargo test -p cambrian-transpiler --test test_audit_stdlib -- --nocapture --test-threads=1
+
+  build:
+    # Binaries only on `v*` tags, and only after the full test family passes
+    # on the published tree.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, coverage-smoke, lean-build, phase-o, stdlib]
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest # cross-compiled; pure-Rust build, no C deps
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release -p cambrian-transpiler --target ${{ matrix.target }}
+        env:
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSET="cambrian-transpiler-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir "$ASSET"
+          cp README.md LICENSE "$ASSET/"
+          case "${{ matrix.target }}" in
+            *windows*)
+              cp "target/${{ matrix.target }}/release/cambrian-transpiler.exe" "$ASSET/"
+              7z a "$ASSET.zip" "$ASSET"
+              ;;
+            *)
+              cp "target/${{ matrix.target }}/release/cambrian-transpiler" "$ASSET/"
+              tar czf "$ASSET.tar.gz" "$ASSET"
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            *.tar.gz
+            *.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Cambrian $GITHUB_REF_NAME" \
+            --notes "Prebuilt \`cambrian-transpiler\` binaries (EVM + Lean targets). See README.md for usage." \
+            assets/*

@@ -1,0 +1,29 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-005 / H-AX-04-04: invariant without `senders {}` — Lean falls back to
+// `MsgCtx.default.sender` (zero); EVM Foundry uses handler `msg.sender`.
+
+entity SenderZero {
+    const ZERO: address = 0x0000000000000000000000000000000000000000
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        countIfZero() where msg::sender == ZERO : throw 1 => []
+    }
+
+    m_zero: u64 {
+        in constructor() => 0
+        in countIfZero() => m_zero + 1
+    }
+}
+
+invariant "no zero hits" for SenderZero {
+    init { m_zero: 0 }
+
+    action countIfZero() { }
+
+    check m_zero == 0
+}

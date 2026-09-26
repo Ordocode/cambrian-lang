@@ -1,0 +1,28 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Shop: customer-facing storefront in a 3-entity marketplace system.
+// Sends createOrder() to Broker via AddressOf.
+
+entity Shop {
+
+    identity m_shop_id: u64
+
+    routes {
+        constructor() => []
+
+        purchase(item_id: u64, price: U256)
+            where price > 0 : throw 1 => [
+                createOrder(item_id, price) ~> Broker.address(m_shop_id)
+            ]
+
+        view getOrdersSent() -> u64 => [
+            return(m_orders_sent)
+        ]
+    }
+
+    m_orders_sent: u64 {
+        in constructor() => 0
+        in purchase(_, _) => m_orders_sent + 1
+    }
+}

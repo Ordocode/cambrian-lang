@@ -1,0 +1,20 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: counter-fuzz
+target: evm
+deterministic_addresses: true
+output_dir: build_fuzz/
+sources:
+  - counter.cam
+  - counter.test.cam
+  - counter.fuzz.cam
+
+fuzz:
+  runs: 32
+  seed: 1
+  shrink: true
+  max_local_rejects: 1024
+
+revm_tests:
+  enabled: true

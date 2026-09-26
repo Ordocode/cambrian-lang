@@ -1,0 +1,15 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+# INT-004 follow-up — SUT deploy → self-call instance binding
+name: lean-sut-deploy-self-call
+target: lean
+deterministic_addresses: true
+output_dir: build-lean/
+lean:
+  numerics: nat
+sources:
+  - cambrian-contracts/Peer.cam
+  - cambrian-contracts/Pair.cam
+  - docs/cambrian-spec/Pair.test.cam
+  - docs/cambrian-spec/Pair.properties.cam

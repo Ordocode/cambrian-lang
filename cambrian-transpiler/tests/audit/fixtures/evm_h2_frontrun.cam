@@ -1,0 +1,38 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H2: permissionless factory.deployVault allows a
+// third party to initialize a predicted address before the honest deployer.
+
+entity Vault {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor(initial_balance: u64) => []
+        getBalance() -> u64 => [
+            return(m_balance)
+        ]
+    }
+
+    m_balance: u64 {
+        in constructor(initial_balance) => initial_balance
+    }
+}
+
+entity Honest {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        createVault(vault_id: u64, initial_balance: u64) => [
+            deploy Vault(vault_id, initial_balance)
+        ]
+    }
+
+    m_created: u64 {
+        in constructor() => 0
+        in createVault(_, _) => m_created + 1
+    }
+}

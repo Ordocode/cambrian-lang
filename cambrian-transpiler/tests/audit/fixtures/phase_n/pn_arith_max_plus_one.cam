@@ -1,0 +1,18 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PN-103: checked add at U256::MAX — EVM must revert, Lean must not wrap silently.
+
+entity Adder {
+    routes {
+        #[factory_only]
+        constructor() => []
+        bump(n: U256) => []
+        get() -> U256 => [ return(m_x) ]
+    }
+
+    m_x: U256 {
+        in constructor() => 0
+        in bump(n) => m_x + n
+    }
+}

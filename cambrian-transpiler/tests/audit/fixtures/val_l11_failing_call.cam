@@ -1,0 +1,28 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit contract T-VAL-003 (L11): fire-and-forget self-send to a failing
+// route without fail surface / `rescue`. Validator must reject; forced Lean
+// must not `lake build` (no silent `exceptGetD`).
+//
+// Note: `call failingHelper` wrappers are auto-promoted to fail-mode via
+// nested `CallRoute` recursion (T-X-010) — that shape is *not* L11.
+
+entity FailCall {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        invoke(amount: u64) => [
+            failingHelper(amount) ~> FailCall.address()
+        ]
+
+        private failingHelper(amount: u64)
+            where amount < 500 : throw 2
+        => []
+    }
+
+    m_x: u64 {
+        in create() => 0
+    }
+}

@@ -1,0 +1,11 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+invariant "simple supply" for Token {
+    init { m_supply: 1000 }
+
+    action transfer(to: address, amount: u64) { }
+    action approve(spender: address, amount: u64) { }
+
+    check totalSupply() == 1000
+}

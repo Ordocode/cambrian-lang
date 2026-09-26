@@ -1,0 +1,35 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis LEAN-H9: with `fail_on_revert: false`, Foundry wraps handler
+// calls in `try/catch` and continues the trace after a revert. Lean `runTrace`
+// for throwing routes short-circuits on `.error e => .error e` even though the
+// invariant theorem accepts `.error _ => True`.
+
+entity TraceCont {
+    routes {
+        #[factory_only]
+        init create() => []
+
+        fail(amount: u64) where amount <= m_count : throw 1 => []
+
+        inc() => []
+    }
+
+    m_count: u64 {
+        in create() => 0
+        in fail(amount) => m_count - amount
+        in inc() => m_count + 1
+    }
+}
+
+invariant "trace continues after revert" for TraceCont {
+    init { m_count: 10 }
+
+    action fail(amount: u64) {
+        bound amount in 100..200
+    }
+    action inc() { }
+
+    check m_count >= 0
+}

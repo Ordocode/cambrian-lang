@@ -1,0 +1,32 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Toy lending pair contract used by `invariant_lending.invariant.cam` to
+// exercise all the new Foundry handler features in one place: tagged
+// invariants, computed bounds against handler-side snapshot bindings,
+// `derived` view helpers, `skip if`, `with_time` time-advancement, and
+// `exclude senders` / `exclude selectors` filters.
+//
+// Toy Pair shape — enough to give the invariant something non-trivial
+// to constrain.
+
+entity LendingPair {
+    routes {
+        deposit(amount: u128) => []
+        withdraw(amount: u128) => []
+        accrueInterest() => []
+        getReserves() -> u128 => [ return(m_total_assets) ]
+    }
+
+    m_total_assets: u128 {
+        in deposit(amount) => m_total_assets + amount
+        in withdraw(amount) => m_total_assets - amount
+        in accrueInterest() => m_total_assets + (m_total_assets / 100)
+    }
+
+    m_borrowed: u128 {
+        in deposit(amount) => m_borrowed
+        in withdraw(amount) => m_borrowed
+        in accrueInterest() => m_borrowed + (m_borrowed / 200)
+    }
+}

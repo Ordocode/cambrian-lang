@@ -1,0 +1,19 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Multi-entity invariant (ERC20-owned): token supply and the factory's
+// pair registry are independent surfaces. Drive a fixed ERC20 instance
+// (id 1) and the singleton factory together; neither the token's non-mint
+// routes nor the factory's stranger-reverting setters touch the checked
+// slots. Owner is the first instance (`tok: ERC20`), so this lands in
+// `ERC20Spec.lean`.
+invariant "token supply and factory pairs stable" for { tok: ERC20, fac: UniswapV2Factory } {
+    init tok { m_token_id: 1, m_total_supply: 0 }
+
+    action tok.transfer(to: address, amount: U256) { }
+    action tok.approve(spender: address, amount: U256) { }
+    action fac.setFeeTo(new_fee_to: address) { }
+
+    check tok.m_total_supply == 0
+    check fac.m_all_pairs.len() == 0
+}

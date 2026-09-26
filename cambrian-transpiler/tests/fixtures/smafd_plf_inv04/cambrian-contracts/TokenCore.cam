@@ -1,0 +1,134 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// TokenCore — Rehearsal Token (RHT) fixed-supply ERC-20 module.
+// Authored from ground-truth spec docs/cambrian-spec/TokenCore.spec.cam.
+
+pure fn balance_of(balances: HashMap<address, U256>, owner: address) -> U256 {
+    balances[owner]
+}
+
+pure fn allowance_of(allowances: HashMap<U256, U256>, owner: address, spender: address) -> U256 {
+    allowances[hashOf(owner, spender)]
+}
+
+pure fn sum_values(values: HashMap<address, U256>) -> U256 {
+    values.keys().fold(0, |acc, k| acc + values[k])
+}
+
+pure fn max_balance(values: HashMap<address, U256>) -> U256 {
+    values.keys().fold(0, |acc, k| {
+        let v = values[k];
+        if v > acc { v } else { acc }
+    })
+}
+
+pure fn decrement_allowance(prev: U256, amount: U256, max_val: U256) -> U256 {
+    if prev == max_val { prev } else { prev - amount }
+}
+
+entity TokenCore {
+
+    const INITIAL_SUPPLY: U256 = 1000000000000000000000000
+    const ZERO_ADDRESS: address = 0x0000000000000000000000000000000000000000
+    const MAX_U256: U256 = 115792089237316195423570985008687907853269984665640564039457584007913129639935
+
+    event Transfer(indexed from_addr: address, indexed to_addr: address, value: U256);
+    event Approval(indexed owner: address, indexed spender: address, value: U256);
+
+    routes {
+        constructor() => [
+            emit Transfer(ZERO_ADDRESS, msg::sender, INITIAL_SUPPLY);
+        ]
+
+        transfer(to: address, amount: U256)
+            where to != ZERO_ADDRESS : throw 201 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 202
+        => [
+            emit Transfer(msg::sender, to, amount);
+        ]
+
+        approve(spender: address, amount: U256)
+            where spender != ZERO_ADDRESS : throw 201
+        => [
+            emit Approval(msg::sender, spender, amount);
+        ]
+
+        transferFrom(from_addr: address, to: address, amount: U256)
+            where from_addr != ZERO_ADDRESS && to != ZERO_ADDRESS : throw 201 &&
+                  balance_of(m_balances, from_addr) >= amount : throw 202 &&
+                  (from_addr == msg::sender ||
+                   allowance_of(m_allowances, from_addr, msg::sender) >= amount) : throw 203
+        => [
+            emit Transfer(from_addr, to, amount);
+        ]
+
+        burn(amount: U256)
+            where balance_of(m_balances, msg::sender) >= amount : throw 202
+        => [
+            emit Transfer(msg::sender, ZERO_ADDRESS, amount);
+        ]
+
+        view name() -> String => [ return("Rehearsal Token") ]
+        view symbol() -> String => [ return("RHT") ]
+        view decimals() -> u8 => [ return(18) ]
+        view totalSupply() -> U256 => [ return(m_total_supply) ]
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+        view allowance(owner: address, spender: address) -> U256 => [
+            return(allowance_of(m_allowances, owner, spender))
+        ]
+    }
+
+    m_total_supply: U256 {
+        in constructor() => INITIAL_SUPPLY
+        in burn(amount) => m_total_supply - amount
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor() => {
+            {}.insert(msg::sender, INITIAL_SUPPLY)
+        }
+        in transfer(to, amount) => {
+            let sender = msg::sender;
+            let bal_from = balance_of(m_balances, sender);
+            let bal_to   = balance_of(m_balances, to);
+            if to == sender { m_balances } else {
+                m_balances
+                    .update(sender, bal_from - amount)
+                    .update(to,     bal_to   + amount)
+            }
+        }
+        in transferFrom(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            if from_addr == to { m_balances } else {
+                m_balances
+                    .update(from_addr, bal_from - amount)
+                    .update(to,        bal_to   + amount)
+            }
+        }
+        in burn(amount) => {
+            let sender = msg::sender;
+            let bal = balance_of(m_balances, sender);
+            m_balances.update(sender, bal - amount)
+        }
+    }
+
+    m_allowances: HashMap<U256, U256> {
+        in approve(spender, amount) => {
+            m_allowances.update(hashOf(msg::sender, spender), amount)
+        }
+        in transferFrom(from_addr, _, amount) => {
+            if from_addr == msg::sender {
+                m_allowances
+            } else {
+                let key = hashOf(from_addr, msg::sender);
+                let prev = allowance_of(m_allowances, from_addr, msg::sender);
+                let next = decrement_allowance(prev, amount, MAX_U256);
+                m_allowances.update(key, next)
+            }
+        }
+    }
+}

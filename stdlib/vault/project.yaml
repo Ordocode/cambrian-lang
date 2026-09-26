@@ -1,0 +1,69 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+# EVM build of the standard-library vault suite.
+#
+# Separate from `stdlib/token/` rather than folded into it, for two reasons.
+# The first is mechanical: the vaults need `mul_div` from `stdlib/math.cam`,
+# and the token project deliberately does not depend on the math component —
+# see the note on `unlimited_allowance` in `token/erc20-core.cam`. The second
+# is the Yul stack limit recorded in the token project's `foundry:` block: the
+# transpiler bundles every entity of a project into one Solidity file plus a
+# factory carrying each one's creation code, and that file is already at the
+# edge at four entities. Two vaults on top of it would not compile.
+#
+# `../token/ERC20Multi.cam` is here as the asset under test, not as a vault
+# dependency. The multicontract harness deploys a real token and points the
+# vault at it, which is the only way the `~> m_asset` reads are exercised at
+# all — a single-instance harness leaves `m_asset` at the zero address and
+# every route reverts on the first call.
+#
+# `fixtures/FeeAsset.cam` is the same idea for the other half of `ERC4626`:
+# it delivers less than it is asked to move, which is the only condition under
+# which a vault that counts what arrived differs from one that trusts the
+# caller's number. It is a fixture, not a component — nothing outside this
+# directory imports it and it is not in the stdlib catalog.
+#
+# There is no `.mut.cam` here and no `project.lean.yaml` to run one from.
+# Every vault route captures a value from a call into the asset
+# (`var paid = transferFrom(...) ~> m_asset`), and the Lean backend rejects
+# such a capture unless it is wrapped in `rescue`, which that backend does not
+# support (P3/L9 against L12). The alarm test is therefore written the other
+# way round, against the EVM build: `mutants.txt` lists eleven real defects,
+# and `../../scripts/mutation-check.sh .` requires the shipped suite to go red
+# on each one — plus a control mutant that must survive, so a broken sandbox
+# cannot pass itself off as a perfect score.
+name: stdlib-vault
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - ../token/ERC20Multi.cam
+  - fixtures/FeeAsset.cam
+  - ERC4626Min.cam
+  - ERC4626Min.test.cam
+  - ERC4626Min.fuzz.cam
+  - ERC4626Min.invariant.cam
+  - ERC4626.cam
+  - ERC4626.test.cam
+  - ERC4626.fuzz.cam
+  - ERC4626.invariant.cam
+
+fuzz:
+  runs: 64
+  seed: 1
+  shrink: true
+  max_local_rejects: 4096
+
+invariant:
+  runs: 16
+  depth: 16
+  fail_on_revert: false
+  seed: 1
+
+foundry:
+  optimizer: true
+  # Off for the same reason the token project has it off: the bundled
+  # project file plus the per-entity factory exhausts the IR optimizer's
+  # stack placement, and it is the bundling rather than the deployed code.
+  via_ir: false

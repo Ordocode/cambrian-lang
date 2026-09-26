@@ -1,0 +1,18 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H17: address-shaped hex literals are wrapped as
+// `address(uint160(...))` even when the binding site expects `bytes32`.
+
+entity HexProbe {
+    routes {
+        #[factory_only]
+        constructor() => []
+        probe() -> bytes32 => [
+            let h = 0xA11CE00000000000000000000000000000000000;
+            return(h)
+        ]
+    }
+
+    m_x: U256 {}
+}

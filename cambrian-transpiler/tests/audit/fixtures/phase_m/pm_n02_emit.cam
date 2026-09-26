@@ -1,0 +1,18 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-CONT-002 / PM-004 (MA-N02): `emit` on Container must not silently drop.
+
+event Bumped(v: u64);
+
+entity E {
+    m_x: u64 {
+        in bump(v) => m_x + v
+    }
+
+    routes {
+        bump(v: u64) => [
+            emit Bumped(v);
+        ]
+    }
+}

@@ -1,0 +1,14 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+# PL-F-INV-04 — Run #9 ctor-mint supplemental with explicit deploy { 0xd01 }.
+name: smafd_plf_inv04
+target: lean
+output_dir: build-lean/
+sources:
+  - cambrian-contracts/TokenCore.cam
+  - docs/cambrian-spec/TokenCore.properties.cam
+  - cambrian-contracts/TokenCore.invariant.cam
+  - cambrian-contracts/TokenCore.invariant_ctor_mint.cam
+lean:
+  numerics: nat

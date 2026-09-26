@@ -1,0 +1,40 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// P3.8 smoke fixture: same-entity sends and raw value transfers.
+//
+// `Ping` is a singleton entity. `kick(n)` performs a typed self-call
+// to `bumped(n)` via `var x = bumped(n) ~> Ping.address()` and binds
+// the returned increment. `payout(recipient, amount)` exercises the
+// raw `~> dest with { value: V }` shape that lowers to
+// `Cambrian.WorldState.transfer` on the Lean target.
+
+entity Ping {
+    routes {
+        // Initialiser — pre-populates `m_count := 1`.
+        init create() => [ ]
+
+        // Self-target view-style route: returns the post-increment.
+        // The state mutation lives in the per-member transform below
+        // (`m_count + n`), keeping `bumped` a pure increment-and-read.
+        bumped(n: u64) -> u64 => [
+            return(m_count + n)
+        ]
+
+        // Same-entity send entry: bumps via the bumped route.
+        kick(n: u64) => [
+            var bumped_value = bumped(n) ~> Ping.address();
+        ]
+
+        // Raw value transfer to an arbitrary address — exercises
+        // `WorldState.transfer` lowering.
+        payout(recipient: address, amount: u128) => [
+            ~> recipient with { value: amount }
+        ]
+    }
+
+    m_count: u64 {
+        in create() => 1
+        in bumped(n) => m_count + n
+    }
+}

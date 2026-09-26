@@ -1,0 +1,10 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: arch-ax03-04-lean
+target: lean
+output_dir: build/
+lean:
+  numerics: overflow-panic
+sources:
+  - ax03_04_match_fail_pure.cam

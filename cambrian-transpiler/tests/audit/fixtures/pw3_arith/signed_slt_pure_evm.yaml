@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pw3-signed-slt-evm
+target: evm
+deterministic_addresses: true
+output_dir: build/
+sources:
+  - signed_slt_pure.cam

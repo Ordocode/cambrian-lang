@@ -1,0 +1,8 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+test "chained insert key count on evm" for KeysUpdateProbe {
+    call seedBoth()
+    call countKeys()
+    expect return 2
+}

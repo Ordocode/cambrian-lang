@@ -1,0 +1,36 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Ledger: immutable record keeper in a 3-entity marketplace system.
+// Accepts recordSale() only from Broker (via from clause).
+// Tracks total number of sales and cumulative volume.
+
+entity Ledger {
+
+    identity m_shop_id: u64
+
+    routes {
+        constructor() => []
+
+        recordSale(item_id: u64, amount: U256)
+            from Broker(m_shop_id) => []
+
+        view getTotalSales() -> u64 => [
+            return(m_total_sales)
+        ]
+
+        view getTotalVolume() -> U256 => [
+            return(m_total_volume)
+        ]
+    }
+
+    m_total_sales: u64 {
+        in constructor() => 0
+        in recordSale(_, _) => m_total_sales + 1
+    }
+
+    m_total_volume: U256 {
+        in constructor() => 0
+        in recordSale(_, amount) => m_total_volume + amount
+    }
+}

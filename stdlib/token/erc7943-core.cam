@@ -1,0 +1,119 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// erc7943-core — pure helpers shared by the uRWA (ERC-7943) entities.
+//
+// Importable (F4-clean: no entity, test, fuzz or invariant here). The
+// permission-only entity and the accounting entity differ in what they claim,
+// not in how a check is computed, so every predicate below is written once.
+//
+// The base-token helpers (`zero_address`, `balance_of`, `allowance_of`, …)
+// come from `erc20-core.cam`, which this file imports so an entity needs one
+// import rather than two.
+
+import "./erc20-core.cam"
+
+// ── The account-level checks ────────────────────────────────────────────
+//
+// ERC-7943 states `canSend` and `canReceive` positively: true means eligible.
+// Storage answers the opposite way round — a missing key on the EVM reads as
+// `false` — so the maps below record the *denial* and the checks negate it.
+// Recording eligibility directly would make an untouched address ineligible,
+// which turns a fresh deployment into a token nobody can move and makes the
+// operator's first job a sweep over every holder.
+
+pure fn send_allowed(blocked: HashMap<address, bool>, account: address) -> bool {
+    !blocked[account]
+}
+
+pure fn receive_allowed(blocked: HashMap<address, bool>, account: address) -> bool {
+    !blocked[account]
+}
+
+pure fn frozen_of(frozen: HashMap<address, U256>, account: address) -> U256 {
+    frozen[account]
+}
+
+// The unfrozen amount, saturating at zero.
+//
+// ERC-7943 requires `setFrozenTokens` to accept an amount above the balance —
+// the operator withholds a sum before the address holds it, which is the
+// ordinary shape of an order naming a quantity rather than a moment. So the
+// subtraction below cannot be written plainly: on a saturated account
+// `balance - frozen` underflows, and under `lean.numerics: nat` it would
+// silently truncate to zero in the proof while reverting on chain.
+pure fn unfrozen_of(frozen: HashMap<address, U256>,
+                    balances: HashMap<address, U256>,
+                    account: address) -> U256 {
+    let bal = balances[account];
+    let frz = frozen[account];
+    if frz >= bal { 0 } else { bal - frz }
+}
+
+// The transfer check.
+//
+// ERC-7943 requires this to call the two account checks *and* to bound the
+// amount by the unfrozen balance. Stating it as one predicate is what makes
+// P0-7 … P0-9 provable: an implementation that reads `canSend` and then
+// ignores it is a counterexample rather than a code-review opinion.
+pure fn transfer_allowed(send_blocked: HashMap<address, bool>,
+                         recv_blocked: HashMap<address, bool>,
+                         frozen: HashMap<address, U256>,
+                         balances: HashMap<address, U256>,
+                         from_addr: address, to: address,
+                         amount: U256) -> bool {
+    send_allowed(send_blocked, from_addr) &&
+    receive_allowed(recv_blocked, to) &&
+    amount <= unfrozen_of(frozen, balances, from_addr)
+}
+
+// ── ERC-165 ─────────────────────────────────────────────────────────────
+//
+// Implemented on each entity rather than here, because a `view` belongs to a
+// `routes` block and this file has no entity. What lives here is the reason
+// the parameter type is not negotiable.
+//
+// ERC-7943 requires `supportsInterface(bytes4)` to answer `true` for
+// `0x3edbb4c4`. The selector is computed from the declared signature, so a
+// parameter declared `u32` or `bytes32` yields a route that is not
+// `supportsInterface(bytes4)`: the standard probe reaches no function, fails,
+// and the caller reads the failure as "not supported" while the route name
+// tells every off-chain reader the probe should have worked. A route that
+// lies about conformance is worse than an absent one — which is why these
+// entities carried none until the EVM backend grew `bytes4`.
+
+// ── The holder count ────────────────────────────────────────────────────
+//
+// The count of addresses with a nonzero balance, after moving `amount`
+// between two *distinct* addresses. Both balances are the ones read before
+// the move, which is what makes `bal_from == amount` the test for "the payer
+// is about to empty".
+//
+// This is a helper rather than four copies of the same three lines inside the
+// member transforms, for one reason beyond taste: the arithmetic is identical
+// across `transfer`, `transferFrom` and `forcedTransfer`, and spelling it out
+// in each pushed `forcedTransfer` one slot past what `via_ir` can fit. A
+// helper gets its own stack frame, so the count costs the caller one call
+// rather than four locals.
+//
+// The gain is added before the loss is subtracted. Under `lean.numerics: nat`
+// the order is not cosmetic: a payer emptying into a fresh address would
+// otherwise pass through `holders - 1` on a one-holder token, which is sound
+// here but only by an argument the reader has to reconstruct.
+pure fn holders_after_move(holders: U256, bal_from: U256,
+                           bal_to: U256, amount: U256) -> U256 {
+    let gained = if bal_to == 0 { 1 } else { 0 };
+    let lost   = if bal_from == amount { 1 } else { 0 };
+    holders + gained - lost
+}
+
+// One if the balance is nonzero, zero otherwise.
+//
+// Only an invariant uses this: `holderCount` is defined as the number of
+// nonzero balances, and the check has to spell that definition out over the
+// bounded address set. An `if` expression is not accepted inside a `check`,
+// and a helper is better than the alternative anyway — it names what the
+// arithmetic means instead of leaving a reader to decode a ternary.
+pure fn counts_as_holder(bal: U256) -> U256 {
+    if bal > 0 { 1 } else { 0 }
+}

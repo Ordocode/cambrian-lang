@@ -1,0 +1,16 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: lending-invariant
+target: evm
+deterministic_addresses: true
+output_dir: build_invariant_lending/
+sources:
+  - invariant_lending.cam
+  - invariant_lending.invariant.cam
+
+invariant:
+  runs: 32
+  depth: 16
+  fail_on_revert: false
+  seed: 1

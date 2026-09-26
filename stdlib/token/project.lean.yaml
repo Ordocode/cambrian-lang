@@ -1,0 +1,35 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Lean build of the standard-library token suite.
+#
+# The companion to `project.yaml`. That one compiles the same sources to EVM
+# and runs them under Foundry; this one lowers them to Lean 4 for formal
+# verification (`lake build` over the generated project).
+name: stdlib-token
+target: lean
+deterministic_addresses: true
+output_dir: build-lean/
+
+# Integer scalars (U256/u*/i*) lower to `Nat` ("simple numbers");
+# `address`/`pubkey`/`hashOf` stay fixed-width.
+lean:
+  numerics: nat
+
+sources:
+  - ERC20.cam
+  - ERC20.test.cam
+  - ERC20.fuzz.cam
+  - ERC20.invariant.cam
+  - ERC20Multi.cam
+  - ERC20Multi.test.cam
+  - ERC20Multi.fuzz.cam
+  - ERC20Multi.invariant.cam
+  - ERC7943Min.cam
+  - ERC7943Min.test.cam
+  - ERC7943Min.fuzz.cam
+  - ERC7943Min.invariant.cam
+  - ERC7943.cam
+  - ERC7943.test.cam
+  - ERC7943.fuzz.cam
+  - ERC7943.invariant.cam

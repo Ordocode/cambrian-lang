@@ -1,0 +1,39 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Property fuzz tests for UniswapV2Pair. The pair routes are heavily
+// cross-contract (every state-mutating route reads
+// `balanceOf(sys::address)` off both ERC20s), so the fuzz harness is
+// limited to what we can reach without a real token. We focus on the
+// route-level `where` chain on `swap(...)`: regardless of the attacker
+// values, on a freshly-deployed pair (zero reserves) every positive-
+// output swap call must revert before any cross-contract read.
+
+property "swap on fresh pair always reverts" (amount0: U256, amount1: U256) for UniswapV2Pair {
+    assume amount0 > 0 || amount1 > 0
+
+    let to = 0x0000000000000000000000000000000000000000000000000000000000000c01
+    let data = b""
+
+    call constructor()
+    call swap(amount0, amount1, to, data)
+    // Any positive amount on a zero-reserve pair fails the
+    // `amount0_out < m_reserve0` (or `< m_reserve1`) guard. We don't
+    // pin the precise throw code — different (amount0, amount1)
+    // combinations can hit 201 or 202 depending on which side is
+    // positive — only that the call reverts.
+    expect throw 201
+
+    fuzz { amount0 in 0..1000000000000, amount1 in 0..1000000000000 }
+}
+
+property "swap with both outputs zero always throws 200" (seed: U256) for UniswapV2Pair {
+    let to = 0x0000000000000000000000000000000000000000000000000000000000000c01
+    let data = b""
+
+    call constructor()
+    call swap(0, 0, to, data)
+    expect throw 200
+
+    fuzz { seed in 0..1000000 }
+}

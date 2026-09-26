@@ -1,0 +1,27 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H18: LET_BINDING_TYPES leaks across routes when
+// tuple-destructure let bindings from routeA are not popped, so routeB's
+// `let q = true` may be declared with the wrong Solidity type.
+
+entity BindingLeak {
+    routes {
+        #[factory_only]
+        constructor() => []
+        routeA(a: u64, b: u64) => [
+            let (q, r) = std::math::divmod(a, b);
+        ]
+        routeB() => [
+            let q = true;
+        ]
+        getFlag() -> bool => [
+            return(m_flag)
+        ]
+    }
+
+    m_flag: bool {
+        in constructor() => false
+        in routeB() => true
+    }
+}

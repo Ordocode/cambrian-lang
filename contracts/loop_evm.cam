@@ -1,0 +1,53 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// EVM loop-lowering fixture.
+//
+// Cambrian's `for x in iter { body }` is a value-producing expression
+// (semantically equivalent to `iter.map(|x| body).collect::<Vec<_>>()`).
+// On EVM it lowers to:
+//
+//     T[] memory _result = new T[](N);
+//     for (uint256 _i = 0; _i < N; ++_i) {
+//         T x = <iter>[_i];      // or `start + _i` for a range
+//         <body>;
+//         _result[_i] = <body value>;
+//     }
+//
+// Two iterator shapes are supported on EVM today:
+//
+//   * `for x in start..end { body }`   (Range)
+//   * `for x in vec_expr   { body }`   (Vec<T>)
+//
+// Iterator-method chains (`xs.iter().filter(...).map(...).fold(...)`)
+// remain unsupported because Solidity has no first-class functions and
+// closure inlining isn't done yet.
+
+pure fn double_all(xs: Vec<u32>) -> Vec<u32> {
+    for x in xs { x * 2 }
+}
+
+pure fn first_n(n: u32) -> Vec<u32> {
+    for i in 0..n { i }
+}
+
+pure fn double_first_n(n: u32) -> Vec<u32> {
+    double_all(first_n(n))
+}
+
+entity LoopDemo {
+
+    routes {
+        constructor() => []
+        seed(n: u32) => []
+        getCount() -> u32 => [ return(m_count) ]
+    }
+
+    m_count: u32 {
+        in constructor() => 0
+        // Pull on the loop-bearing pure fns so the generated free
+        // functions (and their `for`-loops) actually appear in the
+        // emitted Solidity. The actual stored value is just `n`.
+        in seed(n) => m_count + double_first_n(n).len() as u32
+    }
+}

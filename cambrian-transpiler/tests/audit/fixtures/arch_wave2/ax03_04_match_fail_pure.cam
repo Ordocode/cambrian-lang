@@ -1,0 +1,33 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-021 / H-AX-03-04: fail-pure call in a `match` arm — `expr_forces_fail_surface`
+// does not recurse `Match`, so route stays total while arm lowers to `RouteResult`.
+
+enum Mode {
+    Risk,
+    Safe
+}
+
+pure fn risky(x: u64, d: u64) -> u64 {
+    x / d
+}
+
+entity MatchFailPure {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        pick(mode: Mode, n: u64) -> u64 => [
+            let q = match mode {
+                Mode::Risk => risky(m_a, n),
+                Mode::Safe => n
+            };
+            return(q)
+        ]
+    }
+
+    m_a: u64 {
+        in constructor() => 10
+    }
+}

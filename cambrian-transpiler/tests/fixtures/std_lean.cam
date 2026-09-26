@@ -1,0 +1,32 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// STD-LEAN-1 gate: phase-1 std::math + std::str on Lean target.
+entity StdLean {
+    routes {
+        constructor() => []
+        demo(n: u64) -> String => [
+            return(std::str::format("{:06}", std::math::pow(n, 2)))
+        ]
+        parseField(s: String) -> u64 => [
+            let v = match std::str::parse_uint(s, 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        parseU8Overflow() -> bool => [
+            let bad = match std::str::parse_u8("256", 10) { some(_) => false, none => true };
+            return(bad)
+        ]
+        parseI8(s: String) -> i8 => [
+            let v = match std::str::parse_i8(s, 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        metrics(a: u64, b: u64) -> u64 => [
+            return(std::math::clamp(std::math::muldiv(a, b, 100), 0, 1000))
+        ]
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+        in demo(n) => std::math::modpow2(n, 4)
+    }
+}

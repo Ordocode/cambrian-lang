@@ -1,0 +1,31 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Phase EVM-6 M1: extern entity declaration unblocks single-file
+// compilation against a foreign Cambrian / Solidity entity. The
+// `Token` entity is not in this program — we only declare its
+// surface — and `Caller` calls `transfer` and `balanceOf` on it.
+//
+// Without the `extern entity Token { ... }` block, validator E22
+// would reject the typed sends.
+
+extern entity Token {
+    route transfer(amount: U256);
+    view route balanceOf(who: address) -> U256;
+}
+
+entity Caller {
+    routes {
+        constructor(t: Address<Token>) => []
+        ping(amount: U256) => [
+            transfer(amount) ~> m_token
+        ]
+        view checkBalance(who: address) -> U256 => [
+            var b = balanceOf(who) ~> m_token;
+            return(b)
+        ]
+    }
+    m_token: Address<Token> {
+        in constructor(t) => t
+    }
+}

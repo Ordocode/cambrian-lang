@@ -1,0 +1,117 @@
+test_name,validator_verdict,ast_inject,harness_output,deterministic,solc_errors,primary_lane,secondary_lane,notes
+n4_104_types_actual_sol_member_record_field_member_solc,OK,false,false,false,Type uint32 is not implicitly convertible to expected type struct Gauge memory.,CG-MISC,,
+n4_104_types_infer_let_values_u32_array_solc,OK,false,false,false,"Member ""values"" not found or not visible after argument-dependent lookup in mapping(uint64 => uint32).",CG-ITER-1,,
+n4_104_types_infer_record_ghost_two_records_unique_solc,OK,false,false,false,"Member ""x"" not found or not visible after argument-dependent lookup in uint256.",CG-TYPES-3,,
+n4_103_types_simplify_hashmap_exists_alias_init_solc,OK,false,false,false,"Data location must be ""storage"", ""memory"" or ""calldata"" for variable, but none was given.",CG-MISC,,
+n4_110_codegen_route_phased_in_program_var_call_u64_solc,OK,false,false,false,"Explicit type conversion not allowed from ""uint64"" to ""contract ICounter"".",CG-ROUTE-1,,
+n4_113_codegen_route_unphased_var_call_u64_return_solc,OK,false,false,false,"Explicit type conversion not allowed from ""uint64"" to ""contract ICounter"".",CG-ROUTE-1,,
+n4_117_codegen_route_phased_var_call_bool_return_solc,OK,false,false,false,"Explicit type conversion not allowed from ""uint64"" to ""contract IFlags"".",CG-ROUTE-1,,
+n4_117_codegen_route_unphased_var_call_address_return_solc,OK,false,false,false,"Explicit type conversion not allowed from ""uint64"" to ""contract IRegistry"".",CG-ROUTE-1,,
+n4_118_evm_forall_dynamic_fields_bool_address_push_solc,OK,false,true,false,"This function is named ""constructor"" but is not the constructor of the contract. If you intend this to be a constructor, use ""constructor(...) { ... }"" without the ""function"" keyword to define it.|Expected identifier but got 'constructor'",CG-MISC,MULTI_ERR,harness; multi_err=2
+n4_122_codegen_analysis_inner_for_closure_exists_solc,OK,false,false,false,"Member ""length"" not found or not visible after argument-dependent lookup in mapping(uint64 => uint64).",CG-TYPES-3,,
+n4_122_codegen_analysis_addressof_with_params_exists_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_126_types_infer_iter_record_field_vec_member_solc,OK,false,false,false,"The struct has all its members omitted, therefore the getter cannot return any values.|Type int_const 0 is not implicitly convertible to expected type struct Row storage ref.|Type uint256 is not implicitly convertible to expected type uint32.|Explicit type conversion not allowed from ""uint32[] memory"" to ""uint32"".",CG-MISC,MULTI_ERR,multi_err=4
+n4_126_types_infer_let_vec_index_cell_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint32[] memory.,CG-MISC,,
+n4_128_types_infer_iter_pure_fn_vec_for_solc,OK,false,false,false,"Return argument type uint256[] memory is not implicitly convertible to expected type (type of first return variable) uint32[] memory.|Explicit type conversion not allowed from ""uint32[] memory"" to ""uint32"".",CG-TYPES-4,MULTI_ERR,multi_err=2
+n4_128_types_infer_iter_vec_ident_member_for_solc,OK,false,false,false,"Explicit type conversion not allowed from ""uint32[] memory"" to ""uint32"".",CG-MISC,,
+n4_128_types_infer_let_nested_scratch_owner_solc,OK,false,false,false,Type address is not implicitly convertible to expected type uint256.|Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) address.,CG-MISC,MULTI_ERR,multi_err=2
+n4_111_evm_multi_invariant_check_deref_emit_solc,OK,true,false,false,Undeclared identifier.,TB-AST,,
+n4_128_types_is_hashmap_valued_if_index_solc,OK,false,false,false,"Data location must be ""storage"", ""memory"" or ""calldata"" for variable, but none was given.",CG-MISC,,
+n4_128_types_sol_type_vec_record_storage_member_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type struct Item[] memory.,CG-MISC,,
+n4_129_codegen_expr_nested_contains_let_subst_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_129_codegen_expr_std_str_format_namespaced_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_130_codegen_analysis_iterate_is_empty_transform_solc,OK,false,false,false,Type bool is not implicitly convertible to expected type uint256.|Type uint256 is not implicitly convertible to expected type bool.,CG-ANALYSIS-1,MULTI_ERR,multi_err=2
+n4_118_evm_invariant_dual_action_param_selector_close_solc,OK,false,true,false,"Explicit type conversion not allowed from ""bool"" to ""uint256"".",CG-MISC,,harness
+n4_118_evm_invariant_selector_exclude_with_time_close_solc,OK,false,false,false,"Explicit type conversion not allowed from ""bool"" to ""uint256"".",CG-MISC,,
+n4_118_evm_invariant_selector_triple_action_time_senders_close_solc,OK,false,false,false,"Explicit type conversion not allowed from ""bool"" to ""uint256"".",CG-MISC,,
+n4_136_codegen_analysis_pure_fn_param_block_match_exists_solc,OK,false,false,false,Type bool is not implicitly convertible to expected type uint256.|Built-in binary operator == cannot be applied to types uint256 and bool.|Built-in binary operator == cannot be applied to types uint256 and bool.,CG-ANALYSIS-1,MULTI_ERR,multi_err=3
+n4_143_codegen_expr_hoisted_fold_vec_accum_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.,CG-MISC,,
+n4_143_codegen_expr_library_record_pure_fn_narrow_solc,OK,false,false,false,Return argument type struct Pair memory is not implicitly convertible to expected type (type of first return variable) uint256.|Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) struct Pair memory.,CG-TYPES-4,MULTI_ERR,multi_err=2
+n4_143_codegen_expr_nested_exists_let_subst_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_143_codegen_expr_wrapping_mul_route_return_solc,OK,false,false,false,Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) uint64.,CG-TYPES-4,,
+n4_78_codegen_route_materialize_stringliteral_deploy_solc,OK,false,false,false,Immutable variables cannot have a non-value type.,CG-MISC,,
+n4_81_codegen_expr_shl_and_or_binop_solc,OK,false,false,false,Built-in binary operator && cannot be applied to types uint64 and uint64.|Built-in binary operator || cannot be applied to types uint64 and uint64.|Type uint64 is not implicitly convertible to expected type bool.,CG-MISC,MULTI_ERR,multi_err=3
+n4_81_codegen_expr_wrapping_binop_view_return_solc,OK,false,false,false,Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) uint64.,CG-TYPES-4,,
+n4_89_codegen_expr_address_member_with_arg_solc,OK,false,false,false,Return argument type uint64 is not implicitly convertible to expected type (type of first return variable) address.,CG-TYPES-4,,
+n4_89_codegen_expr_hoisted_fold_loop_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.,CG-MISC,,
+n4_89_codegen_expr_record_construct_field_narrow_solc,OK,false,false,false,Return argument type struct Tiny memory is not implicitly convertible to expected type (type of first return variable) uint256.|Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) struct Tiny memory.,CG-TYPES-4,MULTI_ERR,multi_err=2
+n4_89_codegen_expr_temporal_vec_push_block_body_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.,CG-MISC,,
+n4_89_codegen_expr_wrapping_sub_mul_view_solc,OK,false,false,false,Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) uint64.,CG-TYPES-4,,
+n4_91_codegen_route_det_from_custom_error_revert_ext_solc,OK,false,false,true,Undeclared identifier.,CG-EXPR-1,,det
+n4_91_codegen_route_vec_push_alias_scope_reindent_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.,CG-MISC,,
+n4_94_codegen_expr_hoisted_pure_fn_exists_nested_index_comment_solc,OK,false,false,false,Type int_const 0 is not implicitly convertible to expected type bool.,CG-MISC,,
+n4_94_codegen_expr_temporal_push_wrong_member_storage_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.|Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.|Different number of components on the left hand side (1) than on the right hand side (0).,CG-MISC,MULTI_ERR,multi_err=3
+n4_97_codegen_expr_address_member_empty_args_none_solc,OK,false,false,false,"Member ""address"" not found or not visible after argument-dependent lookup in address.",CG-MISC,,
+n4_94_codegen_expr_temporal_vec_push_block_only_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.,CG-MISC,,
+n4_95_codegen_iter_resolve_vec_member_values_shape_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.,CG-MISC,,
+n4_95_codegen_iter_resolve_vec_member_for_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.,CG-MISC,,
+n4_97_codegen_expr_evm_ns_unknown_and_short_args_solc,OK,false,false,false,Undeclared identifier.|Undeclared identifier.,CG-EXPR-1,MULTI_ERR,multi_err=2
+n4_97_codegen_expr_wrapping_sub_mul_member_solc,OK,false,false,false,Type uint256 is not implicitly convertible to expected type uint64.,CG-MISC,,
+n4_98_codegen_route_in_program_var_call_return_solc,OK,false,false,false,"Explicit type conversion not allowed from ""int_const 1"" to ""contract ICounter"".",CG-ROUTE-1,,
+n4_codegen_expr_evm_intrinsics_bundle_solc,OK,false,false,false,Type address is not implicitly convertible to expected type uint256.,CG-MISC,,
+n4_codegen_expr_evm_ns_unknown_intrinsic_none_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_codegen_expr_hoisted_fncall_exists_non_ident_comment_solc,OK,false,false,false,Type int_const 0 is not implicitly convertible to expected type bool.,CG-MISC,,
+n4_codegen_expr_hoisted_generic_map_insert_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_codegen_expr_hoisted_generic_map_update_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_codegen_expr_hoisted_match_int_literal_arm_solc,OK,false,false,false,"Member ""length"" not found or not visible after argument-dependent lookup in string memory.",CG-TYPES-3,,
+n4_codegen_expr_hoisted_record_let_fields_solc,OK,false,false,false,Invalid type for argument in function call. Invalid implicit conversion from uint256 to uint64 requested.,CG-MISC,,
+n4_codegen_expr_hoisted_split_if_delim_solc,OK,false,false,false,"Type string[] memory is not implicitly convertible to expected type uint256.|Member ""length"" not found or not visible after argument-dependent lookup in uint256.",CG-TYPES-1,MULTI_ERR,multi_err=2
+n4_codegen_expr_nested_contains_exists_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_codegen_expr_match_simple_unit_enum_solc,OK,false,false,false,Built-in binary operator == cannot be applied to types uint256 and enum Mode.|Built-in binary operator == cannot be applied to types uint256 and enum Mode.|Invalid type for argument in function call. Invalid implicit conversion from enum Mode to uint256 requested.,CG-MISC,MULTI_ERR,multi_err=3
+n4_codegen_expr_parse_some_arm_hoisted_body_solc,OK,false,false,false,Type uint256 is not implicitly convertible to expected type uint64.,CG-MISC,,
+n4_codegen_expr_simple_match_payload_return_solc,OK,false,false,false,"Member ""tag"" not found or not visible after argument-dependent lookup in uint256.",CG-MISC,,
+n4_codegen_expr_string_split_hoisted_solc,OK,false,false,false,"Type string[] memory is not implicitly convertible to expected type uint256.|Member ""length"" not found or not visible after argument-dependent lookup in uint256.",CG-TYPES-1,MULTI_ERR,multi_err=2
+n4_codegen_expr_sys_msg_context_fields_solc,OK,false,false,false,Type bool is not implicitly convertible to expected type uint256.|Type bool is not implicitly convertible to expected type uint256.|Built-in binary operator || cannot be applied to types uint256 and uint256.|Built-in binary operator || cannot be applied to types uint256 and bool.|Built-in binary operator || cannot be applied to types uint256 and bool.|Built-in binary operator || cannot be applied to types uint256 and bool.|Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) bool.,CG-ANALYSIS-1,MULTI_ERR,multi_err=7
+n4_codegen_expr_wrapping_mul_member_solc,OK,false,false,false,Type uint256 is not implicitly convertible to expected type uint64.,CG-MISC,,
+n4_codegen_expr_wrapping_ops_member_solc,OK,false,false,false,Type uint256 is not implicitly convertible to expected type uint64.,CG-MISC,,
+n4_codegen_iter_chain_fold_tuple_acc_revert_solc,OK,false,false,false,Different number of arguments in return statement than in returns declaration.,CG-E07,,
+n4_codegen_iter_enumerate_take_collect_solc,OK,false,false,false,Return argument type uint256[] memory is not implicitly convertible to expected type (type of first return variable) uint32[] memory.,CG-TYPES-4,,
+n4_codegen_iter_enumerate_on_hashmap_tuple_revert_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_codegen_iter_fold_tuple_acc_pattern_revert_solc,OK,false,false,false,Different number of arguments in return statement than in returns declaration.,CG-MISC,,
+n4_codegen_iter_fold_wildcard_acc_range_solc,OK,false,false,false,Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) uint64.,CG-TYPES-4,,
+n4_codegen_iter_for_hoisted_body_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint32[] memory.,CG-MISC,,
+n4_codegen_iter_for_scalar_pattern_on_hashmap_revert_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_codegen_iter_hashmap_fold_empty_acc_revert_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_codegen_iter_hashmap_tuple_for_solc,OK,false,false,false,Undeclared identifier.,CG-EXPR-1,,
+n4_codegen_iter_infer_fold_acc_record_body_solc,OK,false,false,false,Type int_const 0 is not implicitly convertible to expected type struct Tot memory.|Built-in binary operator + cannot be applied to types struct Tot memory and uint64. No matching user-defined operator found.|Invalid type for argument in function call. Invalid implicit conversion from struct Tot memory to uint64 requested.|Return argument type struct Tot memory is not implicitly convertible to expected type (type of first return variable) uint256.|Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) struct Tot memory.,CG-MISC,MULTI_ERR,multi_err=5
+n4_codegen_iter_range_fold_solc,OK,false,false,false,Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) uint64.,CG-TYPES-4,,
+n4_codegen_library_hashmap_param_emits_view_solc,OK,false,false,false,"Data location must be ""memory"" or ""calldata"" for parameter in external function, but none was given.",CG-MISC,,
+n4_codegen_route_call_route_internal_solc,OK,false,false,false,"Undeclared identifier. ""helper"" is not (or not yet) visible at this point.",CG-EXPR-1,,
+n4_codegen_route_transform_vec_push_no_scope_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.,CG-MISC,,
+n4_codegen_route_transform_vec_push_scoped_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.,CG-MISC,,
+n4_codegen_types_actual_sol_member_record_field_narrow_solc,OK,false,false,false,Type int_const 0 is not implicitly convertible to expected type struct Slot storage ref.,CG-MISC,,
+n4_codegen_types_hashmap_iter_for_pure_solc,OK,false,false,false,"Undeclared identifier. Did you mean ""sum_keys""?|Undeclared identifier. Did you mean ""sum_keys""?",CG-EXPR-1,MULTI_ERR,multi_err=2
+n4_codegen_types_infer_iter_hashmap_index_pure_fn_fold_solc,OK,false,false,false,Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) uint64.,CG-TYPES-4,,
+n4_codegen_types_infer_iter_hashmap_index_vec_for_solc,OK,false,false,false,"Explicit type conversion not allowed from ""uint64[] memory"" to ""uint64"".",CG-MISC,,
+n4_codegen_types_infer_iter_hashmap_index_vec_member_solc,OK,false,false,false,"Explicit type conversion not allowed from ""uint64[] memory"" to ""uint64"".",CG-MISC,,
+n4_codegen_types_infer_iter_hashmap_values_for_solc,OK,false,false,false,"Explicit type conversion not allowed from ""uint64[] memory"" to ""uint64"".",CG-MISC,,
+n4_codegen_types_infer_iter_member_record_field_vec_solc,OK,false,false,false,"The struct has all its members omitted, therefore the getter cannot return any values.|Type int_const 0 is not implicitly convertible to expected type struct Bucket storage ref.|Type uint256 is not implicitly convertible to expected type struct Bucket memory.",CG-MISC,MULTI_ERR,multi_err=3
+n4_codegen_types_infer_iter_record_member_field_vec_solc,OK,false,false,false,"The struct has all its members omitted, therefore the getter cannot return any values.|Type int_const 0 is not implicitly convertible to expected type struct Bundle storage ref.|Type uint256 is not implicitly convertible to expected type uint64.|Explicit type conversion not allowed from ""uint64[] memory"" to ""uint64"".",CG-MISC,MULTI_ERR,multi_err=4
+n4_codegen_types_infer_iter_route_record_field_vec_solc,OK,false,false,false,Expected primary expression.,CG-MISC,,
+n4_codegen_types_infer_iter_record_member_vec_for_solc,OK,false,false,false,Expected primary expression.,CG-MISC,,
+n4_codegen_types_infer_let_field_access_scratch_record_solc,OK,false,false,false,Type address is not implicitly convertible to expected type uint256.|Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) address.,CG-MISC,MULTI_ERR,multi_err=2
+n4_codegen_types_infer_let_field_access_scratch_owner_solc,OK,false,false,false,Type address is not implicitly convertible to expected type uint256.|Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) address.,CG-MISC,MULTI_ERR,multi_err=2
+n4_codegen_types_infer_let_hashmap_alias_keys_values_solc,OK,false,false,false,"Member ""keys"" not found or not visible after argument-dependent lookup in mapping(uint64 => uint64).",CG-ITER-1,,
+n4_codegen_types_infer_let_hashmap_values_bare_solc,OK,false,false,false,"Member ""values"" not found or not visible after argument-dependent lookup in mapping(uint64 => uint64).",CG-ITER-1,,
+n4_codegen_types_infer_tuple_block_tail_destructure_solc,ERR:E23,false,false,false,,TB-V,TB-V,ERR:E23
+n4_codegen_types_infer_let_keys_values_member_transform_solc,OK,false,false,false,"Member ""values"" not found or not visible after argument-dependent lookup in mapping(uint64 => uint64).",CG-ITER-1,,
+n4_codegen_types_infer_let_match_block_some_wildcard_solc,OK,false,false,false,"Built-in binary operator + cannot be applied to types struct Option_uint64 memory and uint256. No matching user-defined operator found.|Built-in binary operator + cannot be applied to types struct Option_uint64 memory and uint64. No matching user-defined operator found.|Explicit type conversion not allowed from ""struct Option_uint64 memory"" to ""uint64"".",CG-MISC,MULTI_ERR,multi_err=3
+n4_codegen_types_infer_let_nested_record_field_update_solc,OK,false,false,false,Type address is not implicitly convertible to expected type uint256.|Return argument type uint256 is not implicitly convertible to expected type (type of first return variable) address.,CG-MISC,MULTI_ERR,multi_err=2
+n4_codegen_types_infer_let_member_record_field_access_solc,OK,false,false,false,Expected primary expression.,CG-MISC,,
+n4_codegen_types_infer_let_values_bare_route_solc,OK,false,false,false,"Member ""values"" not found or not visible after argument-dependent lookup in mapping(uint64 => uint64).",CG-ITER-1,,
+n4_codegen_types_infer_record_ghost_zero_unique_fields_solc,OK,false,false,false,"Member ""price"" not found or not visible after argument-dependent lookup in uint256.",CG-MISC,,
+n4_codegen_types_infer_record_update_ambiguous_fallback_solc,OK,false,false,false,"Member ""price"" not found or not visible after argument-dependent lookup in uint64.",CG-MISC,,
+n4_codegen_types_infer_record_update_field_fallback_solc,OK,false,false,false,"Member ""price"" not found or not visible after argument-dependent lookup in uint64.",CG-MISC,,
+n4_codegen_types_infer_record_update_unique_fee_row_solc,OK,false,false,false,"Member ""price"" not found or not visible after argument-dependent lookup in uint64.",CG-MISC,,
+n4_codegen_types_nested_hashmap_let_match_subst_solc,OK,false,false,false,Type uint256 is not implicitly convertible to expected type uint64.,CG-MISC,,
+n4_codegen_types_record_member_transform_solc,OK,false,false,false,Type int_const 0 is not implicitly convertible to expected type struct Point storage ref.,CG-MISC,,
+n4_codegen_types_record_vec_for_elem_infer_solc,OK,false,false,false,"Member ""ids"" not found or not visible after argument-dependent lookup in uint256.",CG-MISC,,
+n4_codegen_types_sol_type_vec_record_option_solc,OK,false,false,false,Identifier not found or not unique.,CG-MISC,,
+n4_codegen_types_subst_closure_for_shadow_solc,OK,false,false,true,Undeclared identifier.,CG-EXPR-1,,det
+n4_codegen_types_subst_encode_addressof_inner_solc,OK,false,false,true,Different number of components on the left hand side (1) than on the right hand side (2).,CG-TYPES-5,,det
+n4_codegen_types_subst_hashmap_match_namespaced_solc,OK,false,false,false,Different number of components on the left hand side (1) than on the right hand side (2).|Type mapping(uint64 => uint64) is not implicitly convertible to expected type uint256.,CG-TYPES-5,MULTI_ERR,multi_err=2
+n4_codegen_types_subst_macro_record_update_hashmap_let_solc,OK,false,false,false,"Type struct Row storage ref is not implicitly convertible to expected type uint256.|Invalid type for argument in function call. Invalid implicit conversion from struct Row storage ref to uint64 requested.|Member ""score"" not found or not visible after argument-dependent lookup in uint256.",CG-MISC,MULTI_ERR,multi_err=3
+n4_codegen_types_subst_match_for_hashmap_let_solc,OK,false,false,true,Built-in binary operator + cannot be applied to types uint256 and uint256[] memory.,CG-MISC,,det
+n4_codegen_types_subst_unary_cast_array_some_solc,OK,false,false,false,Identifier not found or not unique.,CG-MISC,,
+n4_codegen_types_vec_string_route_memory_params_solc,OK,false,false,false,This expression is not callable.,CG-MISC,,
+n4_codegen_types_vec_push_wildcard_let_solc,OK,false,false,false,Type uint256[] memory is not implicitly convertible to expected type uint64[] memory.,CG-MISC,,

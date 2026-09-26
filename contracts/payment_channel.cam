@@ -1,0 +1,125 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Payment Channel contract in Cambrian
+// Exercises: two-party state, challenge/dispute, time-based settlement,
+//            enum state machine, match expressions, outgoing messages,
+//            msg::timestamp, temporal operator ^
+
+type Amount = U256
+
+entity PaymentChannel {
+
+    const ERROR_NOT_PARTICIPANT: u8 = 1
+    const ERROR_WRONG_STATE: u8 = 2
+    const ERROR_CHALLENGE_ACTIVE: u8 = 3
+    const ERROR_CHALLENGE_EXPIRED: u8 = 4
+    const ERROR_INVALID_NONCE: u8 = 5
+    const ERROR_INSUFFICIENT_DEPOSIT: u8 = 6
+    const CHALLENGE_DURATION: u64 = 3_600
+
+    enum ChannelState {
+        Open,
+        Funded,
+        Active,
+        Challenged,
+        Settled,
+        Closed
+    }
+
+    routes {
+        constructor(party_a: address, party_b: address) => []
+
+        deposit(amount: Amount)
+            where amount > 0 : throw 6 => []
+
+        updateState(nonce: u64, balance_a: Amount, balance_b: Amount)
+            where m_nonce < nonce : throw 5 => []
+
+        challenge(nonce: u64, balance_a: Amount, balance_b: Amount)
+            where m_nonce < nonce : throw 5 => []
+
+        disputeChallenge(nonce: u64, balance_a: Amount, balance_b: Amount)
+            where m_nonce < nonce : throw 5 => []
+
+        settle()
+            where msg::timestamp >= m_challenge_deadline : throw 4 => []
+
+        close() => []
+
+        view getChannelState() -> u8 => [
+            let state_code = match m_state {
+                ChannelState::Open => 0,
+                ChannelState::Funded => 1,
+                ChannelState::Active => 2,
+                ChannelState::Challenged => 3,
+                ChannelState::Settled => 4,
+                ChannelState::Closed => 5
+            };
+            return(state_code)
+        ]
+
+        view getBalanceA() -> Amount => [
+            return(m_balance_a)
+        ]
+    }
+
+    m_party_a: address {
+        in constructor(party_a, _) => party_a
+    }
+
+    m_party_b: address {
+        in constructor(_, party_b) => party_b
+    }
+
+    m_state: ChannelState {
+        in constructor(_, _) => ChannelState::Open
+        in deposit(_) => {
+            let total = m_total_deposited + msg::value as Amount;
+            if total > 0 as Amount { ChannelState::Funded } else { m_state }
+        }
+        in updateState(_, _, _) => ChannelState::Active
+        in challenge(_, _, _) => ChannelState::Challenged
+        in disputeChallenge(_, _, _) => ChannelState::Active
+        in settle() => ChannelState::Settled
+        in close() => ChannelState::Closed
+    }
+
+    m_total_deposited: Amount {
+        in constructor(_, _) => 0 as Amount
+        in deposit(amount) => m_total_deposited + amount as Amount
+    }
+
+    m_balance_a: Amount {
+        in constructor(_, _) => 0 as Amount
+        in updateState(_, balance_a, _) => balance_a
+        in challenge(_, balance_a, _) => balance_a
+        in disputeChallenge(_, balance_a, _) => balance_a
+    }
+
+    m_balance_b: Amount {
+        in constructor(_, _) => 0 as Amount
+        in updateState(_, _, balance_b) => balance_b
+        in challenge(_, _, balance_b) => balance_b
+        in disputeChallenge(_, _, balance_b) => balance_b
+    }
+
+    m_nonce: u64 {
+        in constructor(_, _) => 0
+        in updateState(nonce, _, _) => nonce
+        in challenge(nonce, _, _) => nonce
+        in disputeChallenge(nonce, _, _) => nonce
+    }
+
+    m_challenge_deadline: u64 {
+        in constructor(_, _) => 0
+        in challenge(_, _, _) => msg::timestamp + 3_600
+        in disputeChallenge(_, _, _) => msg::timestamp + 3_600
+    }
+
+    m_challenger: address {
+        in constructor(_, _) => msg::sender
+        in challenge(_, _, _) => msg::sender
+        in disputeChallenge(_, _, _) => msg::sender
+    }
+}

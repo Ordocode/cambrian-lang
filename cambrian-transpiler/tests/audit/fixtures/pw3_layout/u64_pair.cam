@@ -1,0 +1,19 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-S-001 baseline: two u64 members pack into one slot (offset 0 and 8).
+
+entity U64Pair {
+    routes {
+        #[factory_only]
+        constructor() => []
+    }
+
+    m_a: u64 {
+        in constructor() => 0
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+    }
+}

@@ -1,0 +1,20 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-EXT-001 / PM-020: dynamic `address` to `extern entity` must lower on Lean.
+
+extern entity Token {
+    route transfer(to: address, amount: U256);
+}
+
+entity Wallet {
+    routes {
+        #[factory_only]
+        init create() => []
+        pay(token: address, to: address, amt: U256) => [
+            transfer(to, amt) ~> token
+        ]
+    }
+
+    m_x: u64 {}
+}

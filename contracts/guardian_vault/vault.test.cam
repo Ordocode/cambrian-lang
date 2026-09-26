@@ -1,0 +1,49 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Vault entity with from-clause verification.
+// Uses address_of to compute Guardian's address for sender verification.
+
+test "acceptPing increments counter (skip from)" for Vault skip from with { m_id: 42 } {
+    call constructor()
+    expect state { m_ping_count: 0 }
+
+    msg { sender: 0x0000000000000000000000000000000000000000000000000000000000000001 }
+    call acceptPing(0x0000000000000000000000000000000000000000000000000000000000aabbcc)
+    expect state { m_ping_count: 1 }
+
+    call acceptPing(0x0000000000000000000000000000000000000000000000000000000000aabbcc)
+    expect state { m_ping_count: 2 }
+}
+
+test "getPingCount returns counter (skip from)" for Vault skip from with { m_id: 10 } {
+    call constructor()
+    call getPingCount()
+    expect return 0
+
+    call acceptPing(0x0000000000000000000000000000000000000000000000000000000000001111)
+    call getPingCount()
+    expect return 1
+}
+
+test "acceptPing with correct sender passes from check" for Vault with { m_id: 42 } {
+    registry Guardian { code_hash: 0x036c13aebdc5e8ade9893b876cf43737dbcc80b4d3f0b77344eaeba3e29e0380, code_depth: 44, wasm_hash: 0xafe15826a24cbc36468f85df6f7028f89fdbd12f104bc251fe27cd9d03e5838e }
+    let pk = 0x0000000000000000000000000000000000000000000000000000000000001234
+    call constructor()
+
+    msg { pubkey: pk }
+    let guardian_addr = address_of Guardian(42)
+    msg { sender: guardian_addr }
+    call acceptPing(pk)
+    expect state { m_ping_count: 1 }
+}
+
+test "acceptPing with wrong sender fails from check" for Vault with { m_id: 42 } {
+    registry Guardian { code_hash: 0x036c13aebdc5e8ade9893b876cf43737dbcc80b4d3f0b77344eaeba3e29e0380, code_depth: 44, wasm_hash: 0xafe15826a24cbc36468f85df6f7028f89fdbd12f104bc251fe27cd9d03e5838e }
+    let pk = 0x0000000000000000000000000000000000000000000000000000000000001234
+    call constructor()
+
+    msg { sender: 0x0000000000000000000000000000000000000000000000000000000000009999, pubkey: pk }
+    call acceptPing(pk)
+    expect throw 50
+}

@@ -1,0 +1,30 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-VAL-002 / X-H2: mixed-type tuple destructure from a known pure fn.
+// Validator E23 must not fire; codegen must emit per-slot Solidity types
+// (not silent uint256 widen); Forge must compile and preserve semantics.
+
+pure fn split(who: address, seed: U256) -> (address, U256, bool) {
+    if seed > 0 {
+        (who, seed, true)
+    } else {
+        (who, 0, false)
+    }
+}
+
+entity TupleSplit {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        peek(who: address, seed: U256) -> (address, U256, bool) => [
+            let (owner, amt, flag) = split(who, seed);
+            return(owner, amt, flag)
+        ]
+    }
+
+    m_x: U256 {
+        in constructor() => 0
+    }
+}

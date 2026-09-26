@@ -1,0 +1,17 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-EVM-IR-001 / PM-012 / PM-014: wide literal in U256 context must not stay u64 in IR.
+
+entity Wide {
+    routes {
+        #[factory_only]
+        init create() => []
+        set() => []
+    }
+
+    m_val: U256 {
+        in create() => 0
+        in set() => m_val + 18446744073709551616
+    }
+}

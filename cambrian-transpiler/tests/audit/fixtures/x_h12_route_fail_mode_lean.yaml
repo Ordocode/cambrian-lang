@@ -1,0 +1,11 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: x-h12-lean-audit
+target: lean
+output_dir: build/
+sources:
+  - x_h12_route_fail_mode.cam
+
+invariant:
+  fail_on_revert: false

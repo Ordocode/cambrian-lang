@@ -1,0 +1,107 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Property fuzz: balance + voting-power conservation under transfer.
+
+property "transfer conserves total supply" (amount: U256) for ERC20Votes {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    // `transfer` succeeds only for `0 < amount <= balance` (throws 1 on a zero
+    // amount, 2 on insufficient balance); alice holds 1000. Assume that window
+    // so the claim is over a successful call. (Property tools that sample the
+    // raw quantifier ignore the `fuzz` bound below, so this `assume` is what
+    // constrains them.)
+    assume amount > 0 && amount <= 1000
+    call constructor(alice, 1000)
+    msg { sender: alice }
+    call transfer(bob, amount)
+    expect state { m_total_supply: 1000 }
+
+    fuzz { amount in 1..500 }
+}
+
+// The claim above names two distinct holders, so it never reaches the case
+// where payer and payee are the same account. `transfer` reads both balances
+// before it writes either, so an aliased pair has the credit overwrite the
+// debit. `m_total_supply` is a stored scalar and does not move, which is why
+// the conservation claim cannot see this.
+property "a self transfer creates no balance" (holder: address, amount: U256) for ERC20Votes {
+    // `zero_address()` is an entity-scope helper and is not in scope in the
+    // generated harness, so guards are spelled as literals here.
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume amount > 0 && amount <= 1000
+
+    call constructor(holder, 1000)
+    msg { sender: holder }
+    call transfer(holder, amount)
+
+    call balanceOf(holder)
+    expect return 1000
+
+    fuzz { amount in 1..500 }
+}
+
+// The vote ledger is keyed by *delegate*, not by the transacting account, so
+// it aliases without any self-transfer: two holders who picked the same
+// delegate are enough. Both vote entries are read before either is written, so
+// the collision has the credit overwrite the debit and the delegate gains
+// `amount` votes out of nothing. Total supply is untouched by any of it.
+property "a transfer between accounts sharing a delegate creates no votes"
+        (payer: address, payee: address, del: address, amount: U256) for ERC20Votes {
+    assume payer != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payee != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume del   != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume payer != payee
+    assume amount > 0 && amount <= 1000
+
+    call constructor(payer, 1000)
+    msg { sender: payer }
+    call delegate(del)
+    msg { sender: payee }
+    call delegate(del)
+    msg { sender: payer }
+    call transfer(payee, amount)
+
+    // Every token in existence is delegated to `del`, so `del` holds the whole
+    // supply in votes both before and after the move.
+    call getVotes(del)
+    expect return 1000
+
+    fuzz { amount in 1..500 }
+}
+
+// The cheapest of the three aliasing cases to reach: `delegate_of` defaults to
+// the caller, so a holder who never delegated and now names themselves lands on
+// `to == old_del`. The debit and the credit hit the same key.
+property "re-delegating to the current delegate creates no votes"
+        (holder: address, supply: U256) for ERC20Votes {
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume supply > 0 && supply <= 1000
+
+    call constructor(holder, supply)
+    msg { sender: holder }
+    call delegate(holder)
+
+    call getVotes(holder)
+    expect return supply
+
+    fuzz { supply in 1..1000 }
+}
+
+property "mint then burn returns to original supply" (amount: U256) for ERC20Votes {
+    let alice = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob   = 0x0000000000000000000000000000000000000000000000000000000000000a02
+
+    // mint/burn both reject zero amounts (`where amount > 0 : throw 1`); assume
+    // it so the round-trip is over a pair of successful calls.
+    assume amount > 0
+    call constructor(alice, 1000)
+    call mint(bob, amount)
+    msg { sender: bob }
+    call burn(amount)
+
+    expect state { m_total_supply: 1000 }
+
+    fuzz { amount in 1..1000 }
+}

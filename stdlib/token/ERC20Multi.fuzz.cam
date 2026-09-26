@@ -1,0 +1,119 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// DERIVED FILE — do not edit. Generated from token/ERC20.fuzz.cam
+// by src/stdlib-erc20-derive.ts; run `npm run stdlib:derive` after changing the
+// singleton suite. The claims are identical to the singleton's; only the entity
+// under test and its identity seed differ.
+
+// Property fuzz for the standard-library ERC20: what the accounting
+// conserves, over the window in which each route succeeds.
+//
+// Every property assumes its success window explicitly. Property tools that
+// sample the raw quantifier ignore the `fuzz` bound, so the `assume` — not
+// the range — is what keeps the claim over a successful call.
+
+property "transfer conserves total supply" (amount: U256) for ERC20Multi {
+    let alice     = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob       = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    // transfer succeeds for 0 < amount <= balance; alice holds 1000.
+    assume amount > 0 && amount <= 1000
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    msg { sender: alice }
+    call transfer(bob, amount)
+    expect state { m_total_supply: 1000 }
+
+    fuzz { amount in 1..500 }
+}
+
+// Every claim above names two distinct holders, so none of them ever reaches
+// the case where payer and payee are the same account — and that is the case
+// the accounting gets wrong. `transfer` reads both balances before it writes
+// either, so an aliased pair has the credit overwrite the debit and the
+// account gains `amount` out of nothing. `m_total_supply` is a stored scalar
+// and does not move, so the conservation claim above stays green while the
+// token mints. Quantifying the holder is what makes the case reachable.
+property "a self transfer creates nothing" (holder: address, amount: U256) for ERC20Multi {
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    // `zero_address()` is an entity-scope helper and is not in scope in the
+    // generated harness, so the guard is spelled as a literal here.
+    assume holder != 0x0000000000000000000000000000000000000000000000000000000000000000
+    assume amount > 0 && amount <= 1000
+
+    call constructor("Standard Token", "STD", 18, mint_auth, holder, 1000)
+    msg { sender: holder }
+    call transfer(holder, amount)
+
+    call balanceOf(holder)
+    expect return 1000
+
+    fuzz { amount in 1..500 }
+}
+
+property "mint then burn returns to original supply" (amount: U256) for ERC20Multi {
+    let alice     = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob       = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    // mint and burn both reject zero amounts; assume it so the round trip is
+    // over a pair of successful calls. mint is now gated, so it is the minter
+    // who calls it.
+    assume amount > 0
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    msg { sender: mint_auth }
+    call mint(bob, amount)
+    msg { sender: bob }
+    call burn(amount)
+
+    expect state { m_total_supply: 1000 }
+
+    fuzz { amount in 1..1000 }
+}
+
+property "approve then transferFrom drains exactly the allowance" (amount: U256) for ERC20Multi {
+    let alice     = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob       = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol     = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    assume amount > 0 && amount <= 1000
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    msg { sender: alice }
+    call approve(bob, amount)
+    msg { sender: bob }
+    call transferFrom(alice, carol, amount)
+
+    call balanceOf(alice)
+    expect return 1000 - amount
+    call balanceOf(carol)
+    expect return amount
+    call allowance(alice, bob)
+    expect return 0
+
+    fuzz { amount in 1..500 }
+}
+
+// The infinite-allowance carve-out is the one place where a spend does not
+// decrement. It exists to match every widely deployed ERC20, and it is exactly
+// the kind of special case that a later cleanup deletes by accident.
+property "an infinite allowance survives a spend" (amount: U256) for ERC20Multi {
+    let alice     = 0x0000000000000000000000000000000000000000000000000000000000000a01
+    let bob       = 0x0000000000000000000000000000000000000000000000000000000000000a02
+    let carol     = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let mint_auth = 0x0000000000000000000000000000000000000000000000000000000000000b01
+
+    assume amount > 0 && amount <= 1000
+    call constructor("Standard Token", "STD", 18, mint_auth, alice, 1000)
+    msg { sender: alice }
+    call approve(bob, unlimited_allowance())
+    msg { sender: bob }
+    call transferFrom(alice, carol, amount)
+
+    call allowance(alice, bob)
+    expect return unlimited_allowance()
+
+    fuzz { amount in 1..500 }
+}

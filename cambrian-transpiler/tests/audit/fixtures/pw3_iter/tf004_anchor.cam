@@ -1,0 +1,26 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-S-015 row 4 / T-F-004 anchor: canonical filter().map().fold() green baseline.
+
+pure fn tf004_sum(xs: Vec<U256>) -> U256 {
+    xs.filter(|x| *x > 0).map(|x| *x * 2).fold(0, |acc, x| acc + x)
+}
+
+entity Tf004Anchor {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        compute(xs: Vec<U256>) => []
+
+        getSum() -> U256 => [
+            return(m_sum)
+        ]
+    }
+
+    m_sum: U256 {
+        in constructor() => 0
+        in compute(xs) => tf004_sum(xs)
+    }
+}

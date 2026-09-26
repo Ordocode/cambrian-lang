@@ -1,0 +1,132 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// TimelockController — minimal Cambrian re-expression of OpenZeppelin's
+// TimelockController. Singleton (no identity).
+//
+// Simplifications vs OZ v5.0.2:
+//   - Single role-holder per role (m_proposer / m_executor / m_canceller)
+//     instead of OZ's `bytes32 PROPOSER_ROLE` mapping. Multi-holder roles
+//     are out of scope for v1 and would require a `from`-chain over a
+//     `Vec<address>` (gap candidate).
+//   - Role checks use the address-member `from <member>` clause —
+//     `from m_proposer` lowers to `require(msg.sender == m_proposer, ...)`
+//     and replaces the previous `where msg::sender == m_x : throw N`
+//     workaround.
+//   - Operation lifecycle collapses "Pending" + "Ready" into a single
+//     `OpState::Pending`; readiness is computed at `execute(...)` time
+//     by comparing `sys::timestamp` to `m_op_timestamp[id]`.
+//   - Operation id is `hashOf(target, value, data, predecessor, salt)`
+//     (lowers to `keccak256(abi.encode(...))` on EVM).
+//   - Single-target ops only (no `address[] targets` array). v2 extension
+//     once the dynamic-array gap is resolved.
+
+enum OpState {
+    Unset,
+    Pending,
+    Done,
+    Cancelled
+}
+
+entity TimelockController {
+
+    routes {
+        #[factory_only]
+        constructor(min_delay: u64,
+                    proposer: address,
+                    executor: address,
+                    canceller: address) => []
+
+        // Anyone holding the proposer role can schedule an operation
+        // with at least `m_min_delay` seconds of delay before it becomes
+        // executable.
+        schedule(target: address,
+                 value:  U256,
+                 data:   CamData,
+                 predecessor: U256,
+                 salt:        U256,
+                 delay:       u64)
+            from m_proposer : throw 1
+            where delay >= m_min_delay : throw 2
+        => []
+
+        // Anyone holding the executor role can execute a Pending op
+        // whose timestamp has elapsed. The named send `~> target` carries
+        // the original value + calldata. Reentry from `target` cannot
+        // re-execute because `m_op_state[id]` has already been flipped
+        // to `Done` before the external call (EVM SSTORE-before-CALL).
+        execute(target: address,
+                value:  U256,
+                data:   CamData,
+                predecessor: U256,
+                salt:        U256)
+            from m_executor : throw 3
+        => [
+            ~> target with { value: value, data: data }
+        ]
+
+        // The canceller role can cancel a Pending op.
+        cancel(id: U256)
+            from m_canceller : throw 4
+            where m_op_state[id] == OpState::Pending : throw 5
+        => []
+
+        view minDelay() -> u64 => [ return(m_min_delay) ]
+
+        view proposer()  -> address => [ return(m_proposer)  ]
+        view executor()  -> address => [ return(m_executor)  ]
+        view canceller() -> address => [ return(m_canceller) ]
+
+        view operationState(id: U256) -> OpState => [
+            return(m_op_state[id])
+        ]
+
+        view operationReadyAt(id: U256) -> u64 => [
+            return(m_op_timestamp[id])
+        ]
+    }
+
+    m_min_delay: u64 {
+        in constructor(min_delay, _, _, _) => min_delay
+    }
+
+    m_proposer: address {
+        in constructor(_, proposer, _, _) => proposer
+    }
+
+    m_executor: address {
+        in constructor(_, _, executor, _) => executor
+    }
+
+    m_canceller: address {
+        in constructor(_, _, _, canceller) => canceller
+    }
+
+    // Operation lifecycle: Unset (default) → Pending (after schedule) →
+    // Done (after execute) | Cancelled (after cancel).
+    m_op_state: HashMap<U256, OpState> {
+        in schedule(target, value, data, predecessor, salt, _) =>
+            m_op_state.update(
+                hashOf(target, value, data, predecessor, salt),
+                OpState::Pending)
+        in execute(target, value, data, predecessor, salt) =>
+            m_op_state.update(
+                hashOf(target, value, data, predecessor, salt),
+                OpState::Done)
+        in cancel(id) =>
+            m_op_state.update(id, OpState::Cancelled)
+    }
+
+    // The wall-clock time at which the op becomes executable. Set once
+    // by `schedule(...)` to `sys::timestamp + delay` and never updated
+    // again. v1 deliberately does not gate `execute(...)` on
+    // `sys::timestamp >= m_op_timestamp[id]` in a `where` clause — that
+    // condition is evaluated on the chain that runs `execute`, mirroring
+    // the OZ check.
+    m_op_timestamp: HashMap<U256, u64> {
+        in schedule(target, value, data, predecessor, salt, delay) =>
+            m_op_timestamp.update(
+                hashOf(target, value, data, predecessor, salt),
+                sys::timestamp + delay)
+    }
+}

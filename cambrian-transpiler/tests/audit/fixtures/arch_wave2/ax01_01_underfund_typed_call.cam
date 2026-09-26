@@ -1,0 +1,44 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-010 / H-AX-01-01: underfunded static typed send `{ value }` to a singleton
+// creditor — EVM reverts; Lean `WorldState.call` ignores transfer failure
+// (best-effort) but still threads `MsgCtx.withValue` to the callee.
+
+entity UnderfundCreditor {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        accept deposit() => []
+
+        getSpent() -> u128 => [
+            return(m_spent)
+        ]
+    }
+
+    m_spent: u128 {
+        in constructor() => 0
+        in deposit() => m_spent + msg::value as u128
+    }
+}
+
+entity UnderfundPayer {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        tryPay(amount: u128) => [
+            deposit() ~> UnderfundCreditor.address() with { value: amount }
+        ]
+
+        getDone() -> u64 => [
+            return(m_done)
+        ]
+    }
+
+    m_done: u64 {
+        in constructor() => 0
+        in tryPay(_) => m_done + 1
+    }
+}

@@ -1,0 +1,11 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// SD-02 S5b: fuzz range with U256::MAX endpoints (PROP-CORE-008 bound surface).
+
+property "PROP-CORE-008 fuzz bound" (amount: U256) for Sd02Token {
+    call setMax()
+    expect state { m_val: U256::MAX }
+
+    fuzz { amount in 0..U256::MAX }
+}

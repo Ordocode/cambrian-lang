@@ -1,0 +1,59 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Gap 1 fixture: addressOf(Entity.state(args)) is the function-call spelling
+// for Entity.address(args). On the EVM target in deterministic mode, both
+// forms must lower to the same CREATE2 address expression. This fixture
+// exercises both spellings against the same target so test_project.rs can
+// assert byte-equivalence and cross-target portability.
+
+entity AddrOfPinger {
+
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        // Spelling A — dot-method form (already supported).
+        pingDotForm(target_id: u64) => [
+            acceptPing() ~> AddrOfTarget.address(target_id)
+        ]
+
+        // Spelling B — addressOf(Entity.state(args)) function form.
+        pingAddressOf(target_id: u64) => [
+            acceptPing() ~> addressOf(AddrOfTarget.state(target_id))
+        ]
+
+        getPings() -> u64 => [
+            return(m_pings_sent)
+        ]
+    }
+
+    m_pings_sent: u64 {
+        in constructor() => 0
+        in pingDotForm(_) => m_pings_sent + 1
+        in pingAddressOf(_) => m_pings_sent + 1
+    }
+}
+
+entity AddrOfTarget {
+
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        acceptPing()
+            from AddrOfPinger(m_id)
+            => []
+        getPingCount() -> u64 => [
+            return(m_ping_count)
+        ]
+    }
+
+    m_ping_count: u64 {
+        in constructor() => 0
+        in acceptPing() => m_ping_count + 1
+    }
+}

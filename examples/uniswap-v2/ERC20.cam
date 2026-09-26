@@ -1,0 +1,239 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// ERC20 — minimal Cambrian re-expression of OpenZeppelin's ERC20 used
+// as the test token wrapped by `UniswapV2Pair`. **Multi-instance**
+// (`identity { token_id: u8 }`) so the Pair test harness can predict
+// and deploy two distinct token contracts at known addresses
+// (`ERC20.address(0)`, `ERC20.address(1)`) without a hand-written
+// factory.
+//
+// Differs from `examples/governor/ERC20Votes.cam` precisely so this
+// example exercises identity-based CREATE2:
+//
+//   - `governor/ERC20Votes` is a singleton (`no identity`) — there is
+//     exactly one governance token per deployment.
+//   - `uniswap-v2/ERC20` is multi-instance (`identity m_token_id: u8`)
+//     — every Pair needs two distinct ERC20s to wrap.
+//
+// Simplifications vs OZ v5.x:
+//   - No optional `name` / `symbol` / `decimals` views (not needed by
+//     the Pair logic; tests use the address).
+//   - `mint` is open to anyone for the example only; a real deployment
+//     would gate on `from m_minter` or similar.
+//   - Allowances are keyed by `hashOf(owner, spender)` rather than a
+//     nested `HashMap<address, HashMap<address, U256>>`, mirroring the
+//     pattern governor's `m_proposal_state` uses for compound keys.
+//
+// EIP-2612 `permit` is supported (G-U1 — RESOLVED) via `evm::ecrecover`
+// and `evm::keccak256Packed`. The domain `name` / `version` constants
+// are `"Cambrian Test ERC20"` / `"1"`; production code should expose
+// these as views, but the test contract hardcodes the matching
+// pre-keccak'd values for clarity.
+
+// Pure helpers over storage-mapping references (G-T5 lowering: HashMap
+// params become `mapping(...) storage`). On EVM the default value of a
+// missing key is 0, so balances/allowances naturally read as 0 for
+// fresh keys without an `exists()` guard.
+pure fn balance_of(balances: HashMap<address, U256>, owner: address) -> U256 {
+    balances[owner]
+}
+
+pure fn allowance_of(allowances: HashMap<U256, U256>,
+                     owner: address, spender: address) -> U256 {
+    allowances[hashOf(owner, spender)]
+}
+
+pure fn nonce_of(nonces: HashMap<address, U256>, owner: address) -> U256 {
+    nonces[owner]
+}
+
+// EIP-712 domain & permit type-hashes (precomputed keccak256 strings).
+//   keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
+pure fn eip712_domain_typehash() -> U256 {
+    0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f
+}
+//   keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
+pure fn permit_typehash() -> U256 {
+    0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9
+}
+//   keccak256("Cambrian Test ERC20")
+pure fn hashed_name() -> U256 {
+    0x32e024cbc42f6420a1149806b9962ca48445c32e962be590f9d076d28ada8014
+}
+//   keccak256("1")
+pure fn hashed_version() -> U256 {
+    0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6
+}
+
+pure fn permit_digest(owner: address, spender: address, value: U256,
+                     nonce: U256, deadline: U256,
+                     chainid: U256, this_addr: address) -> U256 {
+    let domain_separator = hashOf(
+        eip712_domain_typehash(), hashed_name(), hashed_version(),
+        chainid, this_addr);
+    let struct_hash = hashOf(
+        permit_typehash(), owner, spender, value, nonce, deadline);
+    evm::keccak256Packed(b"\x19\x01", domain_separator, struct_hash)
+}
+
+// Recovers the EIP-712 signer for a permit message; used by the route's
+// `where` clause so the signature is rejected *before* any storage
+// writes (route bodies in Cambrian run after member transforms).
+pure fn permit_signer(owner: address, spender: address, value: U256,
+                     nonce: U256, deadline: U256,
+                     chainid: U256, this_addr: address,
+                     v: u8, r: U256, s: U256) -> address {
+    let digest = permit_digest(owner, spender, value, nonce, deadline,
+                               chainid, this_addr);
+    evm::ecrecover(digest, v, r, s)
+}
+
+entity ERC20 {
+
+    identity m_token_id: u8
+
+    routes {
+        #[factory_only]
+        constructor(initial_holder: address, initial_supply: U256) => []
+
+        transfer(to: address, amount: U256)
+            where amount > 0 : throw 1 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 2
+        => []
+
+        // OZ `transferFrom`: the caller spends `amount` of `from_addr`'s
+        // balance, drawing from `from_addr → msg::sender` allowance.
+        transferFrom(from_addr: address, to: address, amount: U256)
+            where amount > 0 : throw 1 &&
+                  balance_of(m_balances, from_addr) >= amount : throw 2 &&
+                  allowance_of(m_allowances, from_addr, msg::sender) >= amount : throw 3
+        => []
+
+        approve(spender: address, amount: U256) => []
+
+        // EIP-2612 `permit`: gas-less approval via off-chain signature.
+        // Throws 4 if the deadline has passed; throws 5 if the recovered
+        // signer doesn't match `owner` (covers both forged signatures
+        // and replays of stale nonces — the nonce read here is the
+        // pre-update value because `where` runs before member
+        // transforms write to storage). Side effects (allowance update
+        // + nonce bump) live in the matching `m_allowances` / `m_nonces`
+        // member transforms.
+        permit(owner: address, spender: address, value: U256,
+               deadline: U256, v: u8, r: U256, s: U256)
+            where deadline >= sys::timestamp : throw 4 &&
+                  permit_signer(owner, spender, value,
+                                nonce_of(m_nonces, owner),
+                                deadline, sys::chainid, sys::address,
+                                v, r, s) == owner : throw 5
+        => []
+
+        // Open mint for the example only — see header. Real deployments
+        // would gate this on `from m_minter`.
+        mint(to: address, amount: U256)
+            where amount > 0 : throw 1
+        => []
+
+        burn(amount: U256)
+            where amount > 0 : throw 1 &&
+                  balance_of(m_balances, msg::sender) >= amount : throw 2
+        => []
+
+        view balanceOf(owner: address) -> U256 => [
+            return(balance_of(m_balances, owner))
+        ]
+
+        view allowance(owner: address, spender: address) -> U256 => [
+            return(allowance_of(m_allowances, owner, spender))
+        ]
+
+        view totalSupply() -> U256 => [
+            return(m_total_supply)
+        ]
+
+        view tokenId() -> u8 => [
+            return(m_token_id)
+        ]
+
+        view nonces(owner: address) -> U256 => [
+            return(nonce_of(m_nonces, owner))
+        ]
+    }
+
+    m_total_supply: U256 {
+        in constructor(_, supply) => supply
+        in mint(_, amount) => m_total_supply + amount
+        in burn(amount)    => m_total_supply - amount
+    }
+
+    m_balances: HashMap<address, U256> {
+        in constructor(holder, supply) => {
+            {}.insert(holder, supply)
+        }
+        // Both balances are read before either is written, so when payer and
+        // payee are the same address the credit overwrites the debit and the
+        // account gains `amount` out of nothing. `m_total_supply` is a stored
+        // scalar and does not move, so a conservation claim stays green while
+        // the token mints. A self-transfer moves nothing, so returning the map
+        // untouched is also the right semantics.
+        in transfer(to, amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            let bal_to   = balance_of(m_balances, to);
+            if to == msg::sender { m_balances } else {
+                m_balances
+                    .update(msg::sender, bal_from - amount)
+                    .update(to,          bal_to   + amount)
+            }
+        }
+        in transferFrom(from_addr, to, amount) => {
+            let bal_from = balance_of(m_balances, from_addr);
+            let bal_to   = balance_of(m_balances, to);
+            if to == from_addr { m_balances } else {
+                m_balances
+                    .update(from_addr, bal_from - amount)
+                    .update(to,        bal_to   + amount)
+            }
+        }
+        in mint(to, amount) => {
+            let bal_to = balance_of(m_balances, to);
+            m_balances.update(to, bal_to + amount)
+        }
+        in burn(amount) => {
+            let bal_from = balance_of(m_balances, msg::sender);
+            m_balances.update(msg::sender, bal_from - amount)
+        }
+    }
+
+    // Allowances keyed by `hashOf(owner, spender) -> U256`. Cambrian's
+    // hashOf lowers to `keccak256(abi.encode(...))` on EVM, giving the
+    // same compound-key semantics as Solidity's
+    // `mapping(address => mapping(address => uint256))` would, but
+    // sidestepping the nested-HashMap path that's not yet exercised on
+    // the EVM backend.
+    m_allowances: HashMap<U256, U256> {
+        in approve(spender, amount) => {
+            m_allowances.update(hashOf(msg::sender, spender), amount)
+        }
+        in transferFrom(from_addr, _, amount) => {
+            let key = hashOf(from_addr, msg::sender);
+            let prev = allowance_of(m_allowances, from_addr, msg::sender);
+            m_allowances.update(key, prev - amount)
+        }
+        in permit(owner, spender, value, _, _, _, _) => {
+            m_allowances.update(hashOf(owner, spender), value)
+        }
+    }
+
+    // EIP-2612 nonces — incremented on every successful `permit`. The
+    // nonce is folded into the EIP-712 struct hash, so a stale signature
+    // (already-consumed nonce) recovers a digest that doesn't match what
+    // the signer endorsed, sending us through the `signer != owner`
+    // guard above with `throw 5`.
+    m_nonces: HashMap<address, U256> {
+        in permit(owner, _, _, _, _, _, _) => {
+            let prev = nonce_of(m_nonces, owner);
+            m_nonces.update(owner, prev + 1)
+        }
+    }
+}

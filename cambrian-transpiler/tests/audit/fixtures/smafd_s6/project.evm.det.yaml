@@ -1,0 +1,10 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: smafd-s6-det
+target: evm
+deterministic_addresses: true
+output_dir: build-det/
+sources:
+  - S6Token.cam
+  - S6Token.test.cam

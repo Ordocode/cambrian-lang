@@ -1,0 +1,25 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: governor
+target: lean
+deterministic_addresses: true
+output_dir: build-lean/
+# Integer scalars (U256/u*/i*) lower to `Nat` ("simple numbers");
+# `address`/`pubkey`/`hashOf` stay fixed-width.
+lean:
+  numerics: nat
+sources:
+  - ERC20Votes.cam
+  - ERC20Votes.test.cam
+  - ERC20Votes.fuzz.cam
+  - ERC20Votes.invariant.cam
+  - ERC20Votes.multi.invariant.cam
+  - TimelockController.cam
+  - TimelockController.test.cam
+  - TimelockController.invariant.cam
+  - Governor.cam
+  - Governor.test.cam
+  - Governor.fuzz.cam
+  - Governor.invariant.cam
+  - Governor.multi.invariant.cam

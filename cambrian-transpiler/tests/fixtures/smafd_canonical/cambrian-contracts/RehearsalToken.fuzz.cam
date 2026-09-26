@@ -1,0 +1,8 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Supplemental fuzz — links catalog PROP-RHT-003 with a tighter bound.
+#[instantiates("PROP-RHT-003")]
+property "CP-001 transfer half supply bound" (amount: U256) for RehearsalToken {
+    assume amount > 0 && amount <= INITIAL_SUPPLY / 2
+}

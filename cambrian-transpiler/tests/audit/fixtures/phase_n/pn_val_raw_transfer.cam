@@ -1,0 +1,20 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PN-102 triple-target: raw `~> dest with { value }` must lower on EVM / Lean / Native.
+entity Payer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor(payee: address) => []
+
+        pay(amount: u128) => [
+            ~> m_payee with { value: amount }
+        ]
+    }
+
+    m_payee: address {
+        in constructor(payee) => payee
+    }
+}

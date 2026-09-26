@@ -1,0 +1,102 @@
+# Mutants for the standard-library vault suite — the alarm test.
+#
+#   ../../scripts/mutation-check.sh .            # every mutant
+#   ../../scripts/mutation-check.sh . offset-shares-rounds-up
+#
+# Format, one mutant per line:
+#
+#   id | file | search | replace
+#
+# The search text must occur exactly once in the file; a drifted anchor is a
+# hard error, because a mutation suite that silently stops applying its
+# mutants is the failure mode it exists to prevent.
+#
+# Why this file exists instead of `ERC4626.mut.cam`. Everywhere else in the
+# tree the alarm test is written as a deliberately false claim in a `.mut.cam`
+# and run on the Lean target, where `runMutation*` inverts it. These vaults
+# cannot go to that target at all: every route captures a value from a call
+# into the asset (`var paid = transferFrom(...) ~> m_asset`), and Lean P3 wants
+# such a capture wrapped in `rescue`, which the Lean backend does not support
+# (L12). So the negation is applied to the implementation instead of to the
+# claim — break the vault, run the shipped suite, and require it to go red.
+# That is the stronger of the two checks; it is only unusual because the other
+# one is cheaper to write.
+#
+# Each mutant is a real defect somebody could ship, not a syntactic scratch.
+# The comment above each says which property is supposed to notice it.
+
+# ── The control ──────────────────────────────────────────────────────
+#
+# An id prefixed `noop-` inverts the expectation: this one must SURVIVE. It
+# renames a local binding and changes nothing observable, so a run that
+# reports it as caught is reporting on a broken sandbox — a missing
+# dependency, a stale build directory — rather than on the mutation. Without
+# it, "11 of 11 caught" is indistinguishable from "the suite never ran".
+noop-rename-a-local | ERC4626Min.cam | let issued = ratio_shares_down(assets, m_total_supply, held); | let issued_shares = ratio_shares_down(assets, m_total_supply, held); let issued = issued_shares;
+
+# ── The proportional rule (ERC4626Min) ───────────────────────────────
+#
+# Rounding direction on the deposit side. Rounding shares UP hands the
+# depositor the fraction that belongs to the vault — the classic direction
+# error, and the one that pays out over many small deposits rather than once.
+# Caught by: "a deposit at an inexact rate rounds the shares down".
+ratio-shares-rounds-up | erc4626-core.cam | if total == 0 { assets } else { mul_div(assets, supply, total) } | if total == 0 { assets } else { mul_div_up(assets, supply, total) }
+
+# The same error on the mint side, in the direction that undercharges: the
+# caller asks for a share count and pays the rounded-down asset cost.
+# Caught by: "a mint at an inexact rate rounds the cost up".
+ratio-mint-cost-rounds-down | erc4626-core.cam | if supply == 0 { shares } else { mul_div_up(shares, total, supply) } | if supply == 0 { shares } else { mul_div(shares, total, supply) }
+
+# ── The rule with virtual amounts (ERC4626) ──────────────────────────
+#
+# Same deposit-side direction error against the offset denominators.
+# Caught by: the bent-state rounding properties in ERC4626.fuzz.cam.
+offset-shares-rounds-up | erc4626-core.cam | mul_div(assets, supply + vshares, total + 1) | mul_div_up(assets, supply + vshares, total + 1)
+
+# Drops the virtual share addend from the redemption denominator. On a live
+# vault this is nearly invisible — a few wei per redemption — and on an empty
+# one it divides by zero. It is the defect the whole entity exists to prevent,
+# written as one missing term.
+# Caught by: the empty-vault conversions, which divide by `supply + vshares`.
+offset-drops-virtual-shares | erc4626-core.cam | mul_div(shares, total + 1, supply + vshares) | mul_div(shares, total + 1, supply)
+
+# Lowers the constructor's floor to the value it exists to forbid. At one
+# virtual share the first-holder attack costs the attacker about what it costs
+# the victim, which is a price and not a deterrent.
+# Caught by: "a vault below the floor cannot be built" (code 25 at 999).
+virtual-floor-lowered | erc4626-core.cam | pure fn min_virtual_shares() -> U256 { 1000 } | pure fn min_virtual_shares() -> U256 { 1 }
+
+# ── The counted amount (ERC4626) ─────────────────────────────────────
+#
+# Credits the number the caller asked to move rather than the number that
+# arrived. Against an ordinary token the two agree and nothing happens;
+# against a fee-on-transfer token the vault issues shares for assets it never
+# received, and every later holder pays for them.
+# Caught by: the FeeAsset properties in ERC4626.fuzz.cam.
+counted-amount-trusts-the-caller | ERC4626.cam | let issued = offset_shares_down(after - before, m_total_supply, | let issued = offset_shares_down(assets, m_total_supply,
+
+# ── The share ledger ─────────────────────────────────────────────────
+#
+# The aliasing bug. Both balances are read before either is written, so when
+# payer and payee are the same address the credit overwrites the debit and the
+# account mints itself `amount` out of nothing. Swapping the guard to the zero
+# address keeps a guard in the text and removes the one that matters.
+# Caught by: "a share transfer to yourself is a no-op".
+min-self-transfer-credits-twice | ERC4626Min.cam | if to == msg::sender { m_balances } else { | if to == zero_address() { m_balances } else {
+full-self-transfer-credits-twice | ERC4626.cam | if to == msg::sender { m_balances } else { | if to == zero_address() { m_balances } else {
+
+# ── Preview against write ────────────────────────────────────────────
+#
+# `previewWithdraw` quotes the share cost of a withdrawal and must round it in
+# the same direction the route burns. Rounding the quote down while the route
+# still burns up makes the integrator's arithmetic silently short.
+# Caught by: the preview/write agreement properties.
+min-preview-withdraw-rounds-down | ERC4626Min.cam | out:  [ return(ratio_shares_up(assets, m_total_supply, held)) ] | out:  [ return(ratio_shares_down(assets, m_total_supply, held)) ]
+full-preview-withdraw-rounds-down | ERC4626.cam | out:  [ return(offset_shares_up(assets, m_total_supply, | out:  [ return(offset_shares_down(assets, m_total_supply,
+
+# ── The share allowance ──────────────────────────────────────────────
+#
+# Lets anybody redeem anybody's stake. The owner branch above it still
+# answers, so the function keeps its shape and loses its purpose.
+# Caught by: the "without an allowance throws 22" tests in both suites.
+share-allowance-never-checked | erc4626-core.cam | allowance_of(allowances, owner, spender) >= shares | true

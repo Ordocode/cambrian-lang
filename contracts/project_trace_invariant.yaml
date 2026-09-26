@@ -1,0 +1,19 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: counter-trace-invariant
+target: evm
+deterministic_addresses: true
+output_dir: build_trace_invariant/
+sources:
+  - counter.cam
+  - counter_trace.invariant.cam
+
+invariant:
+  runs: 16
+  depth: 8
+  fail_on_revert: false
+  seed: 1
+
+revm_tests:
+  enabled: true

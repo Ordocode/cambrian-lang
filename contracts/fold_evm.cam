@@ -1,0 +1,80 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// EVM `.fold(...)` lowering fixture.
+//
+// `<iter>.fold(init, |acc, x| body)` is parsed as
+// `Expr::MethodCall("fold", [init, Expr::Closure([acc, x], body)])` and
+// already works on Acki Nacki / native Rust. On EVM it lowers to an
+// imperative for-loop with a single accumulator threaded across
+// iterations:
+//
+//     T_acc acc = <init>;
+//     for (uint256 _i = 0; _i < N; ++_i) {
+//         T_var x = <bind: start + _i  OR  vec[_i]>;
+//         <body statements>
+//         acc = <body value>;
+//     }
+//     // value of the .fold expression == acc
+//
+// v1 scope:
+//
+//   * Range  iter: `(start..end).fold(init, |acc, x| body)`
+//   * Vec<T> iter: `vec.fold(init, |acc, x| body)`
+//   * `acc` and `x` are `Pattern::Ident` or `Pattern::Wildcard`
+//   * Tuple-destructured patterns and iterator-method chain prefixes
+//     (`.enumerate().filter().map().fold(...)`) remain deferred.
+
+// ---------------------------------------------------------------------------
+// Range fold — Babylonian-style sqrt with a scalar accumulator.
+// ---------------------------------------------------------------------------
+//
+// 7 self-stabilising iterations of `r = (r + x/r) / 2`. The first step
+// is guarded against the `0/0 = 0` boot case by initialising the
+// accumulator to `x` itself; subsequent steps converge monotonically
+// for any `x <= 2^256-1` (overflow-free because `x/r + r` ≤ `x + 1`
+// once `r` reaches the basin of attraction).
+pure fn babylonian_sqrt(x: U256) -> U256 {
+    (0..7).fold(
+        x,
+        |r, _i| if r == 0 { 0 } else { (r + x / r) / 2 }
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Vec fold — sum of a `Vec<U256>`.
+// ---------------------------------------------------------------------------
+pure fn vec_sum(xs: Vec<U256>) -> U256 {
+    xs.fold(0, |acc, x| acc + x)
+}
+
+// ---------------------------------------------------------------------------
+// Wildcard accumulator (no-op) and wildcard loop variable — exercises
+// the `Pattern::Wildcard` arm on both sides of the closure parameters.
+// ---------------------------------------------------------------------------
+pure fn count_iterations(n: U256) -> U256 {
+    (0..n).fold(0, |acc, _x| acc + 1)
+}
+
+// ---------------------------------------------------------------------------
+// Demo entity that pulls on the fold-bearing pure fns so the generated
+// Solidity actually contains the lowered loops (otherwise dead-code
+// elimination might prune them).
+// ---------------------------------------------------------------------------
+entity FoldDemo {
+
+    routes {
+        constructor() => []
+        seedSqrt(x: U256) => []
+        seedSum(xs: Vec<U256>) => []
+        seedCount(n: U256) => []
+        getValue() -> U256 => [ return(m_value) ]
+    }
+
+    m_value: U256 {
+        in constructor() => 0
+        in seedSqrt(x) => babylonian_sqrt(x)
+        in seedSum(xs) => vec_sum(xs)
+        in seedCount(n) => count_iterations(n)
+    }
+}

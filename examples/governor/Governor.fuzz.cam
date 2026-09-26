@@ -1,0 +1,33 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Property fuzz: queue/execute path-gating cannot be bypassed regardless
+// of the proposal id supplied by the attacker.
+
+property "queue rejects unknown proposal" (id: U256) for Governor {
+    let token    = 0x0000000000000000000000000000000000000000000000000000000000000c01
+    let timelock = 0x0000000000000000000000000000000000000000000000000000000000000c02
+    let admin    = 0x0000000000000000000000000000000000000000000000000000000000000c03
+    let target   = 0x0000000000000000000000000000000000000000000000000000000000000c04
+    let data     = b""
+
+    call constructor(token, timelock, admin, 86400, 1000)
+    call queue(id, target, 0, data, 0xfeedbeef)
+    expect throw 200
+
+    fuzz { id in 1..1000000 }
+}
+
+property "execute rejects unknown proposal" (id: U256) for Governor {
+    let token    = 0x0000000000000000000000000000000000000000000000000000000000000c01
+    let timelock = 0x0000000000000000000000000000000000000000000000000000000000000c02
+    let admin    = 0x0000000000000000000000000000000000000000000000000000000000000c03
+    let target   = 0x0000000000000000000000000000000000000000000000000000000000000c04
+    let data     = b""
+
+    call constructor(token, timelock, admin, 86400, 1000)
+    call execute(id, target, 0, data, 0xfeedbeef)
+    expect throw 300
+
+    fuzz { id in 1..1000000 }
+}

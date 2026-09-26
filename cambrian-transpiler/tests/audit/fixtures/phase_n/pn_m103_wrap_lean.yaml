@@ -1,0 +1,10 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pn-m103-wrap-lean
+target: lean
+output_dir: build/
+sources:
+  - pn_m103_inc.cam
+lean:
+  numerics: overflow-wrap

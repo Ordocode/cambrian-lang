@@ -1,0 +1,25 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: uniswap-v2
+target: lean
+deterministic_addresses: true
+output_dir: build-lean/
+# Integer scalars (U256/u*/i*) lower to `Nat` ("simple numbers");
+# `address`/`pubkey`/`hashOf` stay fixed-width.
+lean:
+  numerics: nat
+sources:
+  - ERC20.cam
+  - ERC20.test.cam
+  - ERC20.fuzz.cam
+  - ERC20.invariant.cam
+  - ERC20.multi.invariant.cam
+  - UniswapV2Pair.cam
+  - UniswapV2Pair.test.cam
+  - UniswapV2Pair.fuzz.cam
+  - UniswapV2Pair.invariant.cam
+  - UniswapV2Factory.cam
+  - UniswapV2Factory.test.cam
+  - UniswapV2Factory.invariant.cam
+  - UniswapV2Factory.multi.invariant.cam

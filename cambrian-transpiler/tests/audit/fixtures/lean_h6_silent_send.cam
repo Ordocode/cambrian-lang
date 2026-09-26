@@ -1,0 +1,36 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis LEAN-H6: unresolved cross-entity typed send lowers to
+// empty `vec![]` (no `-- L8:` sentinel). The harness injects a bogus route
+// name after load to exercise the codegen path validator normally blocks.
+
+entity Treasury {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+        credit() => []
+    }
+
+    m_total: u64 {
+        in create() => 0
+        in credit() => m_total
+    }
+}
+
+entity Sender {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        init create() => []
+
+        ping(treasury_id: u64) => [
+            credit() ~> Treasury.address(treasury_id)
+        ]
+    }
+
+    m_x: u64 {}
+}

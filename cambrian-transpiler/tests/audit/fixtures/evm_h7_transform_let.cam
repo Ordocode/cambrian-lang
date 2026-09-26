@@ -1,0 +1,29 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Audit hypothesis EVM-H7: a member transform that introduces `let`
+// forces immediate in-place writes, so a later transform in the same
+// route may observe post-update state instead of the pre-route snapshot.
+
+entity Counter {
+    routes {
+        #[factory_only]
+        constructor() => []
+        bump() => []
+        getA() -> u64 => [ return(m_a) ]
+        getB() -> u64 => [ return(m_b) ]
+    }
+
+    m_a: u64 {
+        in constructor() => 0
+        in bump() => {
+            let t = m_a + 1;
+            t
+        }
+    }
+
+    m_b: u64 {
+        in constructor() => 0
+        in bump() => m_a + 10
+    }
+}

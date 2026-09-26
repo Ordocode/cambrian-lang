@@ -1,0 +1,37 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// SD-02 layer B: PROP-CORE-008 — infinite allowance survives partial transferFrom.
+
+property "PROP-CORE-008 InfiniteAllowance" () for Sd02AllowanceToken {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender: address  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let carol: address    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+
+    msg { sender: deployer }
+    call constructor(deployer)
+    call approve(spender, U256::MAX)
+    msg { sender: spender }
+    let amount: U256 = 1000000000000000000000
+    call transferFrom(deployer, carol, amount)
+    msg { sender: deployer }
+    call allowance(deployer, spender)
+    expect return U256::MAX
+}
+
+test "finite allowance still decrements" for Sd02AllowanceToken {
+    let deployer: address = 0x0000000000000000000000000000000000000000000000000000000000000d01
+    let spender: address  = 0x0000000000000000000000000000000000000000000000000000000000000a03
+    let carol: address    = 0x0000000000000000000000000000000000000000000000000000000000000a04
+    let approved = 5000000000000000000000
+    let amount   = 1000000000000000000000
+
+    msg { sender: deployer }
+    call constructor(deployer)
+    call approve(spender, approved)
+    msg { sender: spender }
+    call transferFrom(deployer, carol, amount)
+    msg { sender: deployer }
+    call allowance(deployer, spender)
+    expect return approved - amount
+}

@@ -1,0 +1,24 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-020 / H-AX-06-03: member transform div0 — predictor mirror
+// `member_transform_body_checked` must take explicit `nat_numerics` — stale TLS
+// from a prior `gen_project` must not poison overflow-panic classification.
+
+entity DivMemberProbe {
+    routes {
+        #[factory_only]
+        init setup() => []
+
+        split(n: u64) => []
+
+        readA() -> u64 => [
+            return(m_a)
+        ]
+    }
+
+    m_a: u64 {
+        in setup() => 10
+        in split(n) => m_a / n
+    }
+}

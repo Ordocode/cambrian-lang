@@ -1,0 +1,19 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Minimal receiver for U256 inter-contract messaging regression test.
+// Accepts a U256 amount and accumulates it.
+
+entity U256Receiver {
+    routes {
+        constructor() => []
+        acceptAmount(amount: U256) => []
+        getReceived() -> U256 => [
+            return(m_received)
+        ]
+    }
+    m_received: U256 {
+        in constructor() => 0
+        in acceptAmount(amount) => m_received + amount
+    }
+}

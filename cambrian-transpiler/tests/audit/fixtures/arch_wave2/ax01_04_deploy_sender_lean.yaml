@@ -1,0 +1,11 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: arch-ax01-04-lean
+target: lean
+deterministic_addresses: true
+output_dir: build/
+lean:
+  intrinsics: executable
+sources:
+  - ax01_04_deploy_sender_entity.cam

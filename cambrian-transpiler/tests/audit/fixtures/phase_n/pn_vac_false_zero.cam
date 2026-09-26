@@ -1,0 +1,26 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PN-104: mutated false invariant check — sorry closes refutable goal.
+
+entity Counter {
+    routes {
+        #[factory_only]
+        init create() => []
+        bump() => []
+        getCount() -> u64 => [ return(m_count) ]
+    }
+
+    m_count: u64 {
+        in create() => 0
+        in bump() => m_count + 1
+    }
+}
+
+invariant "count is zero" for Counter {
+    init { m_count: 0 }
+
+    action bump() { }
+
+    check m_count == 0
+}

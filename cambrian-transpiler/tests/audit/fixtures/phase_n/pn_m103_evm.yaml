@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: pn-m103-evm
+target: evm
+output_dir: build/
+deterministic_addresses: true
+sources:
+  - pn_m103_inc.cam

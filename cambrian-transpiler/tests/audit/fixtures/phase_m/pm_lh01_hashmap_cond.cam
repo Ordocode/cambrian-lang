@@ -1,0 +1,21 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-LEAN-MAP-001 / PM-007 (MA-LH01): conditional HashMap insert must sync `_keys`.
+
+entity MapCond {
+    routes {
+        #[factory_only]
+        init create() => []
+        upsert(flag: bool, k: address, v: u64) => []
+        listKeys() -> Vec<address> => [
+            let ks = m_map.keys().collect();
+            return(ks)
+        ]
+    }
+
+    m_map: HashMap<address, u64> {
+        in create() => HashMap::new()
+        in upsert(flag, k, v) => { if flag { m_map.insert(k, v) } else { m_map } }
+    }
+}

@@ -1,0 +1,27 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Invariant: the `m_all_pairs` length only ever monotonically
+// increases — regardless of who calls `setFeeTo` / `setFeeToSetter`
+// (both revert under stranger senders), the array must stay empty
+// since `createPair(...)` is the only mutator and we don't drive it
+// here.
+//
+// We focus on a numeric witness because comparing `address` storage
+// slots against a 32-byte hex literal in a `check` clause currently
+// triggers a Solidity type mismatch (G-U7 in PLAN.md). Once the
+// transpiler inserts the `address()` cast around hex literals in
+// invariant `check`s, we can also assert
+// `m_fee_to_setter == 0x...d01`.
+
+invariant "all_pairs_length stays zero without createPair" for UniswapV2Factory {
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000d09,
+        0x0000000000000000000000000000000000000000000000000000000000000d0a
+    }
+
+    action setFeeTo(new_fee_to: address) { }
+    action setFeeToSetter(new_setter: address) { }
+
+    check allPairsLength() == 0
+}

@@ -1,0 +1,46 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Identity pair: demonstrates identity + from clauses + AddressOf.
+// Guardian's m_id is an identity field (affects address).
+// Vault accepts pings only from the Guardian with the same m_id.
+
+entity Guardian {
+
+    routes {
+        constructor() => []
+        ping(vault_id: u64) => [
+            acceptPing(sys::pubkey) ~> Vault.address(vault_id)
+        ]
+        getPings() -> u64 => [
+            return(m_pings_sent)
+        ]
+    }
+
+    identity m_id: u64
+
+    m_pings_sent: u64 {
+        in constructor() => 0
+        in ping(_) => m_pings_sent + 1
+    }
+}
+
+entity Vault {
+
+    routes {
+        constructor() => []
+        acceptPing(sender_pubkey: pubkey)
+            from Guardian(m_id) with {pubkey: sender_pubkey}
+            => []
+        getPingCount() -> u64 => [
+            return(m_ping_count)
+        ]
+    }
+
+    identity m_id: u64
+
+    m_ping_count: u64 {
+        in constructor() => 0
+        in acceptPing(_) => m_ping_count + 1
+    }
+}

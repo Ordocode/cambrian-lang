@@ -1,0 +1,32 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+property "increment from zero" (amount: u64) for Counter with { m_count: 0 } {
+    call increment(amount)
+    expect state { m_count: amount }
+
+    fuzz { amount in 0..1000 }
+}
+
+property "even amounts double" (amount: u64) for Counter with { m_count: 0 } {
+    assume amount % 2 == 0
+    call increment(amount)
+    expect state { m_count: amount }
+
+    fuzz { amount in 0..500 }
+}
+
+property "reset always zeroes" (start: u64) for Counter {
+    call reset()
+    expect state { m_count: 0 }
+
+    fuzz { start in 0..10000 }
+}
+
+// Forall demo: the starting count is universally quantified (`m_count: *`),
+// so the Lean theorem proves "reset zeroes the counter from ANY start", while
+// the dynamic backends sample `m_count` as a fuzz input.
+property "reset zeroes from any start" for Counter with { m_count: * } {
+    call reset()
+    expect state { m_count: 0 }
+}

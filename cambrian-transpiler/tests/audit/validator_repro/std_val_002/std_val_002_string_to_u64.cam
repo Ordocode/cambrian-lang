@@ -1,0 +1,16 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-STD-VAL-002: String expression in member transform without parse_uint → V50.
+
+pure fn field() -> String { "42" }
+
+entity V50StringToU64Probe {
+    routes {
+        go() => []
+    }
+
+    m_x: u64 {
+        in go() => field()
+    }
+}

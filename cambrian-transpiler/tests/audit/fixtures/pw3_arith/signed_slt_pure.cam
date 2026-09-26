@@ -1,0 +1,19 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-005 / UPSTREAM B-34: pure-fn `i8` compare loses signedness on Lean.
+
+pure fn p_slt(a: i8, b: i8) -> bool {
+    a < b
+}
+
+entity SignedSltPure {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        probe(a: i8, b: i8) -> bool => [
+            return(p_slt(a, b))
+        ]
+    }
+}

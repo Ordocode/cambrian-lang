@@ -1,0 +1,108 @@
+# The external surface the standards demand of the token entities.
+#
+# Checked by `scripts/abi-check.py stdlib/token` against the artifacts Foundry
+# writes under `build/out/`. Only the standardised surface is listed: mint,
+# burn, the freeze routes and the generated member getters are deliberately
+# absent, and `--strict` reports them as extras rather than failures.
+#
+# Every line here is a claim a Solidity consumer relies on and no Cambrian
+# test can see, because the harness calls routes directly instead of encoding
+# a call and decoding a result.
+
+# ── EIP-20 ────────────────────────────────────────────────────────────────
+# `transfer`, `transferFrom` and `approve` must answer a bool. A selector does
+# not carry its return type, so omitting it compiles and reverts only in the
+# consumer, at decode time.
+
+ERC20  totalSupply() -> (uint256)  view
+ERC20  balanceOf(address) -> (uint256)  view
+ERC20  allowance(address,address) -> (uint256)  view
+ERC20  transfer(address,uint256) -> (bool)  nonpayable
+ERC20  transferFrom(address,address,uint256) -> (bool)  nonpayable
+ERC20  approve(address,uint256) -> (bool)  nonpayable
+ERC20  name() -> (string)  view
+ERC20  symbol() -> (string)  view
+ERC20  decimals() -> (uint8)  view
+ERC20  event Transfer(indexed address, indexed address, uint256)
+ERC20  event Approval(indexed address, indexed address, uint256)
+
+# ── EIP-2612 ──────────────────────────────────────────────────────────────
+# `r` and `s` are signature halves, not numbers. The EIP types them bytes32,
+# and a relayer building the call from a wallet signature encodes them that
+# way; a uint256 parameter takes the same 32 bytes but answers a different
+# selector, so the call reverts as unknown.
+
+ERC20  nonces(address) -> (uint256)  view
+ERC20  DOMAIN_SEPARATOR() -> (bytes32)  view
+ERC20  permit(address,address,uint256,uint256,uint8,bytes32,bytes32)  nonpayable
+
+# ── ERC20Multi ────────────────────────────────────────────────────────────
+# Same surface; the identity member changes deployment, not the interface.
+
+ERC20Multi  totalSupply() -> (uint256)  view
+ERC20Multi  balanceOf(address) -> (uint256)  view
+ERC20Multi  allowance(address,address) -> (uint256)  view
+ERC20Multi  transfer(address,uint256) -> (bool)  nonpayable
+ERC20Multi  transferFrom(address,address,uint256) -> (bool)  nonpayable
+ERC20Multi  approve(address,uint256) -> (bool)  nonpayable
+ERC20Multi  name() -> (string)  view
+ERC20Multi  symbol() -> (string)  view
+ERC20Multi  decimals() -> (uint8)  view
+ERC20Multi  event Transfer(indexed address, indexed address, uint256)
+ERC20Multi  event Approval(indexed address, indexed address, uint256)
+ERC20Multi  nonces(address) -> (uint256)  view
+ERC20Multi  DOMAIN_SEPARATOR() -> (bytes32)  view
+ERC20Multi  permit(address,address,uint256,uint256,uint8,bytes32,bytes32)  nonpayable
+
+# ── ERC-7943 (uRWA), permission tier ──────────────────────────────────────
+# `canTransfer` is the query an integrator calls before building a transfer,
+# so it must be a view and must answer a bool. `canSend` and `canReceive` are
+# the two halves the decision splits into, kept apart because a one-way
+# restriction — an address that may send but may not receive — is the ordinary
+# shape of an expired attestation and a single check cannot state it.
+
+ERC7943Min  totalSupply() -> (uint256)  view
+ERC7943Min  balanceOf(address) -> (uint256)  view
+ERC7943Min  allowance(address,address) -> (uint256)  view
+ERC7943Min  transfer(address,uint256) -> (bool)  nonpayable
+ERC7943Min  transferFrom(address,address,uint256) -> (bool)  nonpayable
+ERC7943Min  approve(address,uint256) -> (bool)  nonpayable
+ERC7943Min  event Transfer(indexed address, indexed address, uint256)
+ERC7943Min  event Approval(indexed address, indexed address, uint256)
+ERC7943Min  supportsInterface(bytes4) -> (bool)  view
+ERC7943Min  canSend(address) -> (bool)  view
+ERC7943Min  canReceive(address) -> (bool)  view
+ERC7943Min  canTransfer(address,address,uint256) -> (bool)  view
+ERC7943Min  unfrozenTokens(address) -> (uint256)  view
+ERC7943Min  getFrozenTokens(address) -> (uint256)  view
+ERC7943Min  setFrozenTokens(address,uint256) -> (bool)  nonpayable
+ERC7943Min  forcedTransfer(address,address,uint256) -> (bool)  nonpayable
+ERC7943Min  event Frozen(indexed address, uint256)
+ERC7943Min  event ForcedTransfer(indexed address, indexed address, uint256)
+
+# ── ERC-7943 (uRWA), accounting tier ──────────────────────────────────────
+
+ERC7943  totalSupply() -> (uint256)  view
+ERC7943  balanceOf(address) -> (uint256)  view
+ERC7943  allowance(address,address) -> (uint256)  view
+ERC7943  transfer(address,uint256) -> (bool)  nonpayable
+ERC7943  transferFrom(address,address,uint256) -> (bool)  nonpayable
+ERC7943  approve(address,uint256) -> (bool)  nonpayable
+ERC7943  event Transfer(indexed address, indexed address, uint256)
+ERC7943  event Approval(indexed address, indexed address, uint256)
+ERC7943  supportsInterface(bytes4) -> (bool)  view
+ERC7943  canSend(address) -> (bool)  view
+ERC7943  canReceive(address) -> (bool)  view
+ERC7943  canTransfer(address,address,uint256) -> (bool)  view
+ERC7943  unfrozenTokens(address) -> (uint256)  view
+ERC7943  getFrozenTokens(address) -> (uint256)  view
+ERC7943  setFrozenTokens(address,uint256) -> (bool)  nonpayable
+ERC7943  forcedTransfer(address,address,uint256) -> (bool)  nonpayable
+ERC7943  event Frozen(indexed address, uint256)
+ERC7943  event ForcedTransfer(indexed address, indexed address, uint256)
+ERC7943  name() -> (string)  view
+ERC7943  symbol() -> (string)  view
+ERC7943  decimals() -> (uint8)  view
+ERC7943  nonces(address) -> (uint256)  view
+ERC7943  DOMAIN_SEPARATOR() -> (bytes32)  view
+ERC7943  permit(address,address,uint256,uint256,uint8,bytes32,bytes32)  nonpayable

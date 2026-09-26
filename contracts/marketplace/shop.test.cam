@@ -1,0 +1,42 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Tests for Shop — purchase sends to Broker, tracks order count
+
+test "constructor initializes orders sent" for Shop with { m_shop_id: 1 } {
+    registry Broker { code_hash: 0xa59aff770cb3c06f4fc16263627f7558d8761a350567af7ebadcbc0d391c4eda, code_depth: 44, wasm_hash: 0xdb7d32a16611041a64b699074416ac6329e03d698db944146665f3165342d05c }
+    call constructor()
+    expect state { m_orders_sent: 0 }
+}
+
+test "purchase increments orders sent" for Shop with { m_shop_id: 10 } {
+    registry Broker { code_hash: 0xa59aff770cb3c06f4fc16263627f7558d8761a350567af7ebadcbc0d391c4eda, code_depth: 44, wasm_hash: 0xdb7d32a16611041a64b699074416ac6329e03d698db944146665f3165342d05c }
+    call constructor()
+
+    call purchase(1, 500)
+    expect state { m_orders_sent: 1 }
+
+    call purchase(2, 1000)
+    expect state { m_orders_sent: 2 }
+}
+
+test "purchase with zero price throws" for Shop with { m_shop_id: 1 } {
+    registry Broker { code_hash: 0xa59aff770cb3c06f4fc16263627f7558d8761a350567af7ebadcbc0d391c4eda, code_depth: 44, wasm_hash: 0xdb7d32a16611041a64b699074416ac6329e03d698db944146665f3165342d05c }
+    call constructor()
+
+    call purchase(1, 0)
+    expect throw 1
+}
+
+test "getOrdersSent returns counter" for Shop with { m_shop_id: 5 } {
+    registry Broker { code_hash: 0xa59aff770cb3c06f4fc16263627f7558d8761a350567af7ebadcbc0d391c4eda, code_depth: 44, wasm_hash: 0xdb7d32a16611041a64b699074416ac6329e03d698db944146665f3165342d05c }
+    call constructor()
+
+    call getOrdersSent()
+    expect return 0
+
+    call purchase(1, 100)
+    call purchase(2, 200)
+    call getOrdersSent()
+    expect return 2
+}

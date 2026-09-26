@@ -1,0 +1,23 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-O-007 row 1: u64 fold with per-step `(acc + x) as u64` — narrowing panics 0x11 if out of range.
+
+pure fn trunc_fold(xs: Vec<U256>) -> u64 {
+    xs.fold(0, |acc, x| (acc + x) as u64)
+}
+
+entity FoldTrunc {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        run(xs: Vec<U256>) -> u64 => [
+            return(trunc_fold(xs))
+        ]
+    }
+
+    m_n: u64 {
+        in constructor() => 0
+    }
+}

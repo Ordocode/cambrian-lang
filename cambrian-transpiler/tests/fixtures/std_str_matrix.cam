@@ -1,0 +1,145 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-STD-STR-MATRIX: cross-target std::str semantic gate (EVM forge + Lean lake + Container).
+
+entity StdStrMatrix {
+    routes {
+        constructor() => []
+
+        runFormatDefault() -> String => [
+            return(std::str::format("{}", 42))
+        ]
+        runFormatPad6() -> String => [
+            return(std::str::format("{:06}", 42))
+        ]
+        runParseDec() -> u64 => [
+            let v = match std::str::parse_u64("123", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseHex() -> u64 => [
+            let v = match std::str::parse_u64("ff", 16) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseU8Overflow() -> bool => [
+            let bad = match std::str::parse_u8("100", 16) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseU8Max() -> u8 => [
+            let v = match std::str::parse_u8("255", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseU8Zero() -> u8 => [
+            let v = match std::str::parse_u8("0", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseU16Max() -> u16 => [
+            let v = match std::str::parse_u16("65535", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseU16Overflow() -> bool => [
+            let bad = match std::str::parse_u16("65536", 10) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseU32Max() -> u32 => [
+            let v = match std::str::parse_u32("4294967295", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseU32Overflow() -> bool => [
+            let bad = match std::str::parse_u32("4294967296", 10) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseU128Max() -> u128 => [
+            let v = match std::str::parse_u128("340282366920938463463374607431768211455", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseU128Overflow() -> bool => [
+            let bad = match std::str::parse_u128("340282366920938463463374607431768211456", 10) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseU256Max() -> U256 => [
+            let v = match std::str::parse_U256("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseU256Overflow() -> bool => [
+            let bad = match std::str::parse_U256("100000000000000000000000000000000000000000000000000000000000000000", 16) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseI8Min() -> i8 => [
+            let v = match std::str::parse_i8("-128", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseI8Overflow() -> bool => [
+            let bad = match std::str::parse_i8("-129", 10) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseI16Min() -> i16 => [
+            let v = match std::str::parse_i16("-32768", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseI16Overflow() -> bool => [
+            let bad = match std::str::parse_i16("-32769", 10) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseI32Min() -> i32 => [
+            let v = match std::str::parse_i32("-2147483648", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseI32Overflow() -> bool => [
+            let bad = match std::str::parse_i32("-2147483649", 10) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseI64Min() -> i64 => [
+            let v = match std::str::parse_i64("-9223372036854775808", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseI64Overflow() -> bool => [
+            let bad = match std::str::parse_i64("-9223372036854775809", 10) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseI128Overflow() -> bool => [
+            let bad = match std::str::parse_i128("80000000000000000000000000000000", 16) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseRadix2() -> u8 => [
+            let v = match std::str::parse_u8("11111111", 2) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseRadix36() -> u8 => [
+            let v = match std::str::parse_u8("z", 36) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseBadRadix() -> bool => [
+            let bad = match std::str::parse_u64("10", 37) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseEmpty() -> bool => [
+            let bad = match std::str::parse_u64("", 10) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseInvalidDigit() -> bool => [
+            let bad = match std::str::parse_u64("12a3", 10) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParse0xWrongRadix() -> bool => [
+            let bad = match std::str::parse_u64("0xff", 10) { some(_) => false, none => true };
+            return(bad)
+        ]
+        runParseUintAlias() -> u64 => [
+            let v = match std::str::parse_uint("99", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runParseIntAlias() -> i64 => [
+            let v = match std::str::parse_int("-7", 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+        runRoundTrip() -> u64 => [
+            let v = match std::str::parse_u64(std::str::format("{:06}", 42), 10) { some(x) => x, none => 0 };
+            return(v)
+        ]
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+    }
+}

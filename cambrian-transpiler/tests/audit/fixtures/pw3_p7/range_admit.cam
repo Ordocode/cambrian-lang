@@ -1,0 +1,20 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-G-007: E07 warns on bare Range in route body; EVM runtime reverts.
+
+entity RangeAdmit {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        run(n: u64) -> u64 => [
+            let r = 0..n;
+            return(0)
+        ]
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+    }
+}

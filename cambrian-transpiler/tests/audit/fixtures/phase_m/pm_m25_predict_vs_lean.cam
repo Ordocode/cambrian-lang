@@ -1,0 +1,19 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-EVM-DET-001 / PM-025: factory predict* must match Lean analytic address.
+
+entity PredictTarget {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        ping() => []
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+        in ping() => m_x + 1
+    }
+}

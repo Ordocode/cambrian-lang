@@ -1,0 +1,44 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-011 / H-AX-01-03: underfunded `deploy … with { value }` — EVM reverts;
+// Lean `WorldState.call` inside deploy ignores transfer failure but still installs.
+
+entity ValueVault {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        getBalance() -> u128 => [
+            return(m_balance)
+        ]
+    }
+
+    m_balance: u128 {
+        in constructor() => msg::value as u128
+    }
+}
+
+entity ValueSpawner {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        spawn(vault_id: u64, amount: u128) => [
+            deploy ValueVault(vault_id) with { value: amount }
+        ]
+
+        getSpawns() -> u64 => [
+            return(m_spawns)
+        ]
+    }
+
+    m_spawns: u64 {
+        in constructor() => 0
+        in spawn(_, _) => m_spawns + 1
+    }
+}

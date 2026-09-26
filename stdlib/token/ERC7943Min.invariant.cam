@@ -1,0 +1,121 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Stateful evidence for the two claims a permission layer exists to make:
+// without the operator's key nothing in the rule state moves, and without it
+// no value moves either.
+//
+// Both invariants deploy with the operator held at an address the fuzzer does
+// not drive. The harness constructs the entity with the default arguments and
+// then pokes the operator in, so the initial supply is zero and every balance
+// with it — which is what makes the second check below a statement about the
+// gates rather than about the opening balance sheet.
+//
+// The rule routes take an `account` the fuzzer chooses, so each is `bound`
+// into the two driver addresses. `bound` rather than `assume`: an `assume`
+// pinning a fuzzed address rejects the draw at odds of 2^-160, so the action
+// would never run and the check would pass over an empty trace. Bounding maps
+// every draw into the set instead of discarding it.
+
+// P0-3 in stateful form, widened to the other two rule routes.
+//
+// A single property can only witness one call. This one says the rule state
+// is unreachable across arbitrary sequences: no ordering of freezes, blocks
+// and seizures attempted by a non-operator leaves a mark. Remove the operator
+// gate from any one of the three writers and the trace that exercises it
+// falsifies this.
+invariant "no key but the operator moves the rule state" for ERC7943Min {
+    init { m_operator: 0x0000000000000000000000000000000000000000000000000000000000000b01 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action setFrozenTokens(account: address, amount: U256) {
+        bound account in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action setSendBlocked(account: address, blocked: bool) {
+        bound account in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action setReceiveBlocked(account: address, blocked: bool) {
+        bound account in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    check getFrozenTokens(0x0000000000000000000000000000000000000000000000000000000000000a01) +
+          getFrozenTokens(0x0000000000000000000000000000000000000000000000000000000000000a02) == 0
+}
+
+// The same claim for the two account checks.
+//
+// Split from the freeze because the checks answer `bool` and the frozen
+// amounts sum: folding them into one expression would mean a violation of
+// either reports as the same failure, and the first question after a red
+// invariant is which gate leaked.
+invariant "no key but the operator moves the account checks" for ERC7943Min {
+    init { m_operator: 0x0000000000000000000000000000000000000000000000000000000000000b01 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action setSendBlocked(account: address, blocked: bool) {
+        bound account in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action setReceiveBlocked(account: address, blocked: bool) {
+        bound account in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action setFrozenTokens(account: address, amount: U256) {
+        bound account in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    check canSend(0x0000000000000000000000000000000000000000000000000000000000000a01) &&
+          canReceive(0x0000000000000000000000000000000000000000000000000000000000000a01) &&
+          canSend(0x0000000000000000000000000000000000000000000000000000000000000a02) &&
+          canReceive(0x0000000000000000000000000000000000000000000000000000000000000a02)
+}
+
+// P0-2 in stateful form, together with the mint gate.
+//
+// The emission opens at zero and only the operator may raise it, so a total
+// that stays at zero across a trace of mints, seizures, transfers and burns
+// says every value-creating route held its gate. Balances are summed in
+// alongside the emission rather than trusted to follow it: a route that
+// credits an account without raising the total would leave `totalSupply`
+// honest and the check red, which is the shape of the aliasing defect this
+// corpus has produced once already.
+//
+// The transfer routes are in the action set for closure, not for coverage.
+// Every balance here is zero, so the unfrozen check rejects any amount worth
+// sending and they cannot reach their own bodies — the aliasing case they
+// carry is covered by the fuzz suite, which controls the opening balance.
+invariant "no key but the operator moves value" for ERC7943Min {
+    init { m_operator: 0x0000000000000000000000000000000000000000000000000000000000000b01 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action mint(to: address, amount: U256) {
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action forcedTransfer(from_addr: address, to: address, amount: U256) {
+        bound from_addr in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action transfer(to: address, amount: U256) {
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action transferFrom(from_addr: address, to: address, amount: U256) {
+        bound from_addr in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+        bound to in 0x0000000000000000000000000000000000000000000000000000000000000a01 ..= 0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+    action approve(spender: address, amount: U256) { }
+    action burn(amount: U256) { }
+
+    check balanceOf(0x0000000000000000000000000000000000000000000000000000000000000a01) +
+          balanceOf(0x0000000000000000000000000000000000000000000000000000000000000a02) +
+          totalSupply() == 0
+}

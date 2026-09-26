@@ -1,0 +1,24 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-S-001 baseline: entity-scoped struct (PM-024 family).
+
+entity EntityRecord {
+    record Pair {
+        lo: U256,
+        hi: U256,
+    }
+
+    routes {
+        #[factory_only]
+        constructor() => []
+    }
+
+    m_pair: Pair {
+        in constructor() => m_pair
+    }
+
+    m_x: u64 {
+        in constructor() => 0
+    }
+}

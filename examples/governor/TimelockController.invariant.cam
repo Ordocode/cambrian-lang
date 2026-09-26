@@ -1,0 +1,22 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Invariant: only the proposer / executor / canceller can ever advance
+// `m_op_state`. We can't easily express role-based reachability in the
+// fuzzer here (the action distribution does not pick `msg.sender`), so
+// we settle for a trivial structural invariant — `m_min_delay` never
+// changes after construction.
+
+invariant "min delay is immutable post-construction" for TimelockController {
+    init { m_min_delay: 60 }
+
+    action schedule(target: address, value: U256, data: CamData,
+                    predecessor: U256, salt: U256, delay: u64) {
+        bound delay in 60..3600
+    }
+    action execute(target: address, value: U256, data: CamData,
+                   predecessor: U256, salt: U256) { }
+    action cancel(id: U256) { }
+
+    check m_min_delay == 60
+}

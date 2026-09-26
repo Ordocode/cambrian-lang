@@ -1,0 +1,115 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Two-party escrow with arbiter and timeout in Cambrian
+// Exercises: state machine via u8 constants, time-based preconditions,
+//            msg::sender verification, outgoing messages, multiple where clauses,
+//            simple arithmetic, boolean members
+
+pure fn is_party(sender: address, buyer: address, seller: address) -> bool {
+    sender == buyer || sender == seller
+}
+
+entity Escrow {
+
+    const STATE_CREATED: u8 = 0
+    const STATE_FUNDED: u8 = 1
+    const STATE_RELEASED: u8 = 2
+    const STATE_REFUNDED: u8 = 3
+    const STATE_DISPUTED: u8 = 4
+    const STATE_RESOLVED: u8 = 5
+
+    const ERROR_WRONG_STATE: u8 = 10
+    const ERROR_NOT_BUYER: u8 = 11
+    const ERROR_NOT_SELLER: u8 = 12
+    const ERROR_NOT_ARBITER: u8 = 13
+    const ERROR_NOT_PARTY: u8 = 14
+    const ERROR_DEADLINE_PASSED: u8 = 15
+    const ERROR_DEADLINE_NOT_PASSED: u8 = 16
+    const ERROR_ZERO_AMOUNT: u8 = 17
+
+    routes {
+        constructor(buyer: address, seller: address, arbiter: address,
+                    amount: U256, deadline: u64) => []
+
+        fund()
+            where m_state == 0 : throw 10 &&
+                  msg::sender == m_buyer : throw 11 => []
+
+        release()
+            where m_state == 1 : throw 10 &&
+                  msg::sender == m_buyer : throw 11 => [
+                ~> m_seller
+            ]
+
+        refund()
+            where m_state == 1 : throw 10 &&
+                  msg::sender == m_seller : throw 12 => [
+                ~> m_buyer
+            ]
+
+        claimTimeout()
+            where m_state == 1 : throw 10 &&
+                  msg::sender == m_buyer : throw 11 &&
+                  msg::timestamp > m_deadline : throw 16 => [
+                ~> m_buyer
+            ]
+
+        dispute()
+            where m_state == 1 : throw 10 &&
+                  is_party(msg::sender, m_buyer, m_seller) : throw 14 => []
+
+        resolve(to_buyer_pct: u8)
+            where m_state == 4 : throw 10 &&
+                  msg::sender == m_arbiter : throw 13 => [
+                let buyer_amount = m_amount * to_buyer_pct as U256 / 100;
+                let seller_amount = m_amount - buyer_amount;
+                if buyer_amount + seller_amount == m_amount => [
+                    ~> m_buyer
+                    ~> m_seller
+                ]
+            ]
+
+        getStatus() -> (u8, U256, u64, bool) => [
+            return(m_state, m_amount, m_deadline, m_funded)
+        ]
+    }
+
+    m_buyer: address {
+        in constructor(buyer, _, _, _, _) => buyer
+    }
+
+    m_seller: address {
+        in constructor(_, seller, _, _, _) => seller
+    }
+
+    m_arbiter: address {
+        in constructor(_, _, arbiter, _, _) => arbiter
+    }
+
+    m_amount: U256 {
+        in constructor(_, _, _, amount, _) => amount
+    }
+
+    m_deadline: u64 {
+        in constructor(_, _, _, _, deadline) => deadline
+    }
+
+    m_funded: bool {
+        in constructor(_, _, _, _, _) => false
+        in fund() => true
+    }
+
+    m_state: u8 {
+        in constructor(_, _, _, _, _) => 0
+        in fund() => 1
+        in release() => 2
+        in refund() => 3
+        in claimTimeout() => 3
+        in dispute() => 4
+        in resolve(_) => 5
+    }
+}

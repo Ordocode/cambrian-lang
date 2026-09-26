@@ -1,0 +1,384 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// Cambrian translation of MultisigWallet contract
+// Pure functions for bit manipulation and calculations
+use gosh
+
+pure fn get_mask_value(mask: U256, index: u8) -> u8 {
+    ((mask >> (8 * index as U256)) & 0xFF) as u8
+}
+
+pure fn inc_mask_value(mask: U256, index: u8) -> U256 {
+    mask + (1 << (8 * index as U256))
+}
+
+pure fn dec_mask_value(mask: U256, index: u8) -> U256 {
+    mask - (1 << (8 * index as U256))
+}
+
+pure fn check_bit(mask: u32, index: u8) -> bool {
+    (mask & (1 << index as u32)) != 0
+}
+
+pure fn set_confirmed(mask: u32, index: u8) -> u32 {
+    mask | (1 << index as u32)
+}
+
+pure fn generate_id(timestamp: u64, logicaltime: u64) -> u64 {
+    (timestamp << 32) | (logicaltime & 0xFFFFFFFF)
+}
+
+pure fn get_expiration_bound(timestamp: u64) -> u64 {
+    (timestamp - 3601) << 32
+}
+
+pure fn get_send_flags(all_balance: bool) -> u8 {
+    if all_balance { 128 } else { 1 }
+}
+
+pure fn min(a: u8, b: u8) -> u8 {
+    if a <= b { a } else { b }
+}
+
+pure fn build_custodians(owners: Vec<U256>) -> HashMap<U256, u8> {
+    owners.enumerate()
+        .filter(|(_, owner)| *owner != 0)
+        .fold(
+            {},                         // initial_accumulator: empty mapping
+            |acc, (i, owner)|           // accumulator, current_item -> new_accumulator
+                if acc.exists(*owner) { acc } else { acc.insert(*owner, i as u8) }
+        )
+}
+
+pure fn count_unique_owners(owners: Vec<U256>) -> u8 {
+    owners.filter(|owner| *owner != 0)
+        .fold(
+            {},                         // initial_accumulator: empty mapping for deduplication
+            |acc, owner|               // accumulator, current_item -> new_accumulator
+                acc.insert(*owner, true)
+        )
+        .len() as u8
+}
+
+pure fn remove_expired_transactions(
+    transactions: HashMap<u64, Transaction>,
+    requests_mask: U256,
+    timestamp: u64,
+    max_cleanup: u32
+    ) -> (HashMap<u64, Transaction>, U256) {
+    let expiration_bound = get_expiration_bound(timestamp);
+
+    // iter() creates an iterator over (transaction_id, transaction) pairs from the mapping
+    // This allows functional-style processing without mutating the original mapping
+    transactions.iter()
+        .filter(|(id, _)| *id <= expiration_bound)  // keep only expired transactions
+        .take(max_cleanup as usize)  // limit cleanup to max_cleanup transactions for gas efficiency
+        .fold(
+            (transactions, requests_mask),  // initial_accumulator: original state
+            |(txns, mask), (id, txn)|       // accumulator, current_item -> new_accumulator
+                (txns.remove(*id), dec_mask_value(mask, txn.index))
+        )
+}
+
+entity MultisigWallet {
+
+    // Type definitions
+    record Transaction {
+        id: u64,
+        confirmations_mask: u32,
+        signs_required: u8,
+        signs_received: u8,
+        creator: U256,
+        index: u8,
+        dest: address,
+        value: u128,
+        cc: HashMap<u32, u32>,
+        send_flags: u8,
+        payload: Vec<u8>,
+        bounce: bool
+    }
+
+    record CustodianInfo {
+        index: u8,
+        pubkey: U256
+    }
+
+    // Constants
+    const MAX_QUEUED_REQUESTS: u8 = 5
+    const EXPIRATION_TIME: u64 = 3601
+    const MAX_CUSTODIAN_COUNT: u8 = 32
+    const FLAG_PAY_FWD_FEE_FROM_BALANCE: u8 = 1
+    const FLAG_SEND_ALL_REMAINING: u8 = 128
+
+    // Error codes
+    const ERROR_NOT_CUSTODIAN: u8 = 100
+    const ERROR_ZERO_OWNER: u8 = 101
+    const ERROR_TRANSACTION_NOT_EXISTS: u8 = 102
+    const ERROR_ALREADY_CONFIRMED: u8 = 103
+    const ERROR_VALUE_TOO_LOW: u8 = 107
+    const ERROR_SINGLE_CUSTODIAN_REQUIRED: u8 = 108
+    const ERROR_TOO_MANY_CUSTODIANS: u8 = 110
+    const ERROR_TOO_MANY_REQUESTS: u8 = 113
+    const ERROR_INVALID_CUSTODIAN_COUNT: u8 = 117
+    const ERROR_EXPIRED: u8 = 122
+    const ERROR_NEED_CONFIRMATIONS: u8 = 123
+
+    // Macros for computed values
+    macro cleaned_transactions() -> HashMap<u64, Transaction> = {
+        let (cleaned_txns, _) = remove_expired_transactions(
+            m_transactions, m_requests_mask, msg::timestamp, m_max_cleanup_txns);
+        cleaned_txns
+    }
+
+    macro custodian_not_confirmed(transaction_id: u64) -> bool = {
+        let cleaned_txns = @cleaned_transactions();
+        if cleaned_txns.exists(transaction_id) {
+            let txn = cleaned_txns[transaction_id];
+            let custodian_index = m_custodians[msg::pubkey];
+            !check_bit(txn.confirmations_mask, custodian_index)
+        } else {
+            false
+        }
+    }
+
+    macro transaction_will_execute(transaction_id: u64) -> bool = {
+        // Check expiration first
+        if transaction_id <= get_expiration_bound(msg::timestamp) {
+            false  // Expired transactions cannot execute
+        } else {
+            let cleaned_txns = @cleaned_transactions();
+            let txn = cleaned_txns[transaction_id];
+            (txn.signs_received + 1) >= txn.signs_required
+        }
+    }
+
+    routes {
+        // Constructor route
+        constructor(owners: Vec<U256>, req_confirms: u8, value: u64)
+        where owners.len() > 0 : throw 117 &&
+              owners.len() <= MAX_CUSTODIAN_COUNT as usize : throw 110 && 
+              req_confirms > 0 : throw 123 => []
+
+        // Accept incoming transfers (from IAccept interface)
+        acceptTransfer(payload: Vec<u8>) => []
+
+        // Exchange token function
+        exchangeToken(value: u64)
+        where m_custodians.exists(msg::pubkey) : throw 100 => []
+
+        // Send transaction (single custodian fast path)
+        sendTransaction(dest: address, value: u128, cc: HashMap<u32, u32>,
+                       bounce: bool, flags: u8, payload: Vec<u8>)
+        where m_custodian_count == 1 : throw 108 &&
+              msg::pubkey == m_owner_key : throw 100 &&
+              value >= m_min_value : throw 107 => [
+            ~> dest with {value: value, bounce: bounce, flags: flags, payload: payload}
+        ]
+
+        // Submit transaction for multi-sig approval
+        // Two phases: cleanup expired txns (+ commit), then execute business logic
+        submitTransaction(dest: address, value: u128, cc: HashMap<u32, u32>,
+                         bounce: bool, all_balance: bool, payload: Vec<u8>)
+        where m_custodians.exists(msg::pubkey) : throw 100 &&
+              value >= m_min_value : throw 107 &&
+              get_mask_value(m_requests_mask, m_custodians[msg::pubkey]) < MAX_QUEUED_REQUESTS : throw 113 => [
+            cleanup: [
+                gosh::commit()
+            ]
+            execute: [
+                if m_default_required_confirmations == 1 => [
+                    ~> dest with {value: value, bounce: bounce, flags: get_send_flags(all_balance), payload: payload}
+                ]
+            ]
+        ]
+
+        // Confirm pending transaction
+        // Two phases: cleanup expired txns (+ commit), then confirm & possibly execute
+        confirmTransaction(transaction_id: u64)
+        where m_custodians.exists(msg::pubkey) : throw 100 &&
+              @cleaned_transactions().exists(transaction_id) : throw 102 &&
+              @custodian_not_confirmed(transaction_id) : throw 103 => [
+            cleanup: [
+                gosh::commit()
+            ]
+            execute: [
+                if @transaction_will_execute(transaction_id) => [
+                    let txn = m_transactions[transaction_id];
+                    ~> txn.dest with {value: txn.value, bounce: txn.bounce, flags: txn.send_flags, payload: txn.payload}
+                ]
+            ]
+        ]
+        
+        // Configuration updates
+        setMaxCleanupTxns(value: u32)
+        where m_custodians.exists(msg::pubkey) : throw 100 => []
+
+        setMinValue(value: u128)
+        where m_custodians.exists(msg::pubkey) : throw 100 => []
+
+        // View functions with return values
+        getParameters() -> (u8, u8, u64, u128, u8) => [
+            return(MAX_QUEUED_REQUESTS, MAX_CUSTODIAN_COUNT, EXPIRATION_TIME, m_min_value, m_default_required_confirmations)
+        ]
+
+        getTransaction(transaction_id: u64) -> Transaction
+        where m_transactions.exists(transaction_id) : throw 102 => [
+            return(m_transactions[transaction_id])
+        ]
+
+        getTransactions() -> Vec<Transaction> => [
+            let filtered_txns = m_transactions.iter()  // iter() creates iterator over (key, value) pairs
+                .filter(|(id, _)| *id > get_expiration_bound(msg::timestamp))  // keep non-expired
+                .map(|(_, txn)| *txn)  // extract just the transaction values
+                .collect();  // collect() converts iterator back to Vec<Transaction>
+            return(filtered_txns)
+        ]
+
+        getTransactionIds() -> Vec<u64> => [
+            let ids = m_transactions.keys().collect();  // collect() converts iterator to Vec<u64>
+            return(ids)
+        ]
+
+        getCustodians() -> Vec<CustodianInfo> => [
+            let custodian_infos = m_custodians.iter()  // iter() creates iterator over (pubkey, index) pairs
+                .map(|(pubkey, index)| CustodianInfo { index: *index, pubkey: *pubkey })  // transform to CustodianInfo
+                .collect();  // collect() converts iterator to Vec<CustodianInfo>
+            return(custodian_infos)
+        ]
+
+        isConfirmed(mask: u32, index: u8) -> bool => [
+            return(check_bit(mask, index))
+        ]
+
+        // Version information
+        getVersion() -> (String, String) => [
+            return("1.0.0", "Multisig")
+        ]
+
+        // Default routes for receiving funds
+        receive() => []
+
+        fallback() => []
+    }
+
+    // State members
+    m_owner_key: U256 {
+        in constructor(owners, _, _) => owners[0]
+    }
+
+    m_custodians: HashMap<U256, u8> {
+        in constructor(owners, _, _) => build_custodians(owners)
+    }
+
+    m_custodian_count: u8 {
+        in constructor(owners, _, _) => count_unique_owners(owners)
+    }
+
+    m_default_required_confirmations: u8 {
+        in constructor(owners, req_confirms, _) => min(^m_custodian_count, req_confirms)
+    }
+
+    m_requests_mask: U256 {
+        in constructor(_, _, _) => 0
+
+        in submitTransaction(_, _, _, _, _, _) =>
+            cleanup: {
+                let (_, cleaned_mask) = remove_expired_transactions(
+                    m_transactions, m_requests_mask, msg::timestamp, m_max_cleanup_txns);
+                cleaned_mask
+            }
+            execute: {
+                let custodian_index = m_custodians[msg::pubkey];
+                inc_mask_value(m_requests_mask, custodian_index)
+            }
+
+        in confirmTransaction(transaction_id) =>
+            cleanup: {
+                let (_, cleaned_mask) = remove_expired_transactions(
+                    m_transactions, m_requests_mask, msg::timestamp, m_max_cleanup_txns);
+                cleaned_mask
+            }
+            execute: {
+                if @transaction_will_execute(transaction_id) {
+                    let txn = m_transactions[transaction_id];
+                    dec_mask_value(m_requests_mask, txn.index)
+                } else {
+                    m_requests_mask
+                }
+            }
+    }
+
+    m_transactions: HashMap<u64, Transaction> {
+        in constructor(_, _, _) => {}
+
+        in submitTransaction(dest, value, cc, bounce, all_balance, payload) =>
+            cleanup: {
+                let (cleaned_txns, _) = remove_expired_transactions(
+                    m_transactions, m_requests_mask, msg::timestamp, m_max_cleanup_txns);
+                cleaned_txns
+            }
+            execute: {
+                if m_default_required_confirmations > 1 {
+                    let custodian_index = m_custodians[msg::pubkey];
+                    let flags = get_send_flags(all_balance);
+                    let txn_id = generate_id(msg::timestamp, msg::logicaltime);
+                    let new_txn = Transaction {
+                        id: txn_id,
+                        confirmations_mask: set_confirmed(0, custodian_index),
+                        signs_required: m_default_required_confirmations,
+                        signs_received: 1,
+                        creator: msg::pubkey,
+                        index: custodian_index,
+                        dest: dest,
+                        value: value,
+                        cc: cc,
+                        send_flags: flags,
+                        payload: payload,
+                        bounce: bounce
+                    };
+                    m_transactions.insert(txn_id, new_txn)
+                } else {
+                    m_transactions
+                }
+            }
+
+        in confirmTransaction(transaction_id) =>
+            cleanup: {
+                let (cleaned_txns, _) = remove_expired_transactions(
+                    m_transactions, m_requests_mask, msg::timestamp, m_max_cleanup_txns);
+                cleaned_txns
+            }
+            execute: {
+                if transaction_id <= get_expiration_bound(msg::timestamp) {
+                    m_transactions.remove(transaction_id)
+                } else {
+                    let txn = m_transactions[transaction_id];
+                    let custodian_index = m_custodians[msg::pubkey];
+
+                    let updated_txn = txn {
+                        confirmations_mask: set_confirmed(txn.confirmations_mask, custodian_index),
+                        signs_received: txn.signs_received + 1
+                    };
+
+                    if updated_txn.signs_received >= updated_txn.signs_required {
+                        m_transactions.remove(transaction_id)
+                    } else {
+                        m_transactions.update(transaction_id, updated_txn)
+                    }
+                }
+            }
+    }
+
+    m_min_value: u128 {
+        in constructor(_, _, _) => 0
+        in setMinValue(value) => value
+    }
+
+    m_max_cleanup_txns: u32 {
+        in constructor(_, _, _) => 40
+        in setMaxCleanupTxns(value) => value
+    }
+
+
+}

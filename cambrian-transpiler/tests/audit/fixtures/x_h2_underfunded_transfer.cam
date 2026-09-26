@@ -1,0 +1,25 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-002 / LEAN-H3: raw transfer of more than the contract balance.
+// EVM ground truth: revert. Lean abstract model (non-fail route): must
+// not silently ignore the transfer error.
+
+entity Wallet {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        sendTooMuch(recipient: address) => [
+            ~> recipient with { value: 1000 }
+        ]
+
+        getBalance() -> u128 => [
+            return(m_balance)
+        ]
+    }
+
+    m_balance: u128 {
+        in constructor() => 100
+    }
+}

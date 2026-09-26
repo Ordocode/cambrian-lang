@@ -1,0 +1,17 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-VAL-010 control: alias-to-primitive cast must not trigger E21.
+
+type Amount = U256
+
+entity X {
+    routes {
+        view get() -> u64 => [
+            let a = 1 as Amount;
+            return(0)
+        ]
+    }
+
+    m_dummy: u64 {}
+}

@@ -1,0 +1,47 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// PW3-S-014 row 4 / PN-107 extension: multi-entity invariant trace accessors.
+
+entity VaultA {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        deposit(amount: u64) => []
+    }
+
+    m_balance: u64 {
+        in constructor() => 0
+        in deposit(amount) => m_balance + amount
+    }
+}
+
+entity VaultB {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        deposit(amount: u64) => []
+    }
+
+    m_balance: u64 {
+        in constructor() => 0
+        in deposit(amount) => m_balance + amount
+    }
+}
+
+invariant "dual vault trace" for { va: VaultA, vb: VaultB } {
+    init va { m_balance: 0 }
+    init vb { m_balance: 0 }
+
+    action va.deposit(amount: u64) {
+        bound amount in 1..50
+    }
+    action vb.deposit(amount: u64) {
+        bound amount in 1..50
+    }
+
+    check va.m_balance + vb.m_balance >= 0
+    check trace::length <= 64
+}

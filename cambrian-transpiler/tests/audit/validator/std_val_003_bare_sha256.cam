@@ -1,0 +1,14 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-STD-VAL-003: bare `sha256` must trigger V49 (use std::crypto::sha256).
+
+entity BareSha256Probe {
+    routes {
+        view hash() -> bytes => [
+            return(sha256("data"))
+        ]
+    }
+
+    m_x: u64 {}
+}

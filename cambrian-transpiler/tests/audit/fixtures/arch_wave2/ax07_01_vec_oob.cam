@@ -1,0 +1,19 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-ARCH-006 / H-AX-07-01: Vec index OOB — EVM Panic 0x32 vs Lean `List.getD … default`.
+
+entity VecOob {
+    routes {
+        #[factory_only]
+        constructor() => []
+
+        readAt(i: u64) -> u64 => [
+            return(m_items[i])
+        ]
+    }
+
+    m_items: Vec<u64> {
+        in constructor() => array(10, 20)
+    }
+}

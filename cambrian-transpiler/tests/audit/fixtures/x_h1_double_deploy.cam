@@ -1,0 +1,41 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// T-X-001 / EVM-H16 / LEAN-H5: two CREATE2 deploys with the same identity
+// in one route. EVM: second `new {salt: bytes32(0)}` reverts. Lean: overwrites.
+
+entity Vault {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        getMarker() -> u64 => [ return(m_marker) ]
+    }
+
+    m_marker: u64 {
+        in constructor() => 1
+    }
+}
+
+entity Deployer {
+    identity m_id: u64
+
+    routes {
+        #[factory_only]
+        constructor() => []
+        spawn(id: u64) => [
+            deploy Vault(id)
+        ]
+        respawn(id: u64) => [
+            deploy Vault(id)
+            deploy Vault(id)
+        ]
+    }
+
+    m_spawns: u64 {
+        in constructor() => 0
+        in spawn(_) => m_spawns + 1
+        in respawn(_) => m_spawns + 2
+    }
+}

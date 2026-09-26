@@ -1,0 +1,36 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+// P1 parity fixture — explicit deploy { } vs trace senders { }.
+
+entity MintToken {
+    routes {
+        #[factory_only]
+        constructor(mint_to: address) => []
+        burn(amount: u64) => []
+    }
+
+    m_minted_to: address {
+        in constructor(mint_to) => mint_to
+    }
+
+    m_total_supply: u64 {
+        in constructor(mint_to) => 1_000_000
+        in burn(amount) => m_total_supply - amount
+    }
+}
+
+invariant "supply cap explicit deploy" for MintToken {
+    deploy { 0x0000000000000000000000000000000000000000000000000000000000000d01 }
+
+    senders {
+        0x0000000000000000000000000000000000000000000000000000000000000a01,
+        0x0000000000000000000000000000000000000000000000000000000000000a02
+    }
+
+    action burn(amount: u64) {
+        bound amount in 1..100_000
+    }
+
+    check m_total_supply <= 1_000_000
+}

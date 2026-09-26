@@ -1,0 +1,21 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+invariant "vault sum is bounded" for { v: Vault, a: Vault, t: Treasury } {
+    init v { m_vault_id: 1, m_balance: 0 }
+    init a { m_vault_id: 2, m_balance: 0 }
+    init t { m_total: 0 }
+
+    action v.deposit(amount: u64) {
+        bound amount in 0..1000
+    }
+    action a.deposit(amount: u64) {
+        bound amount in 0..1000
+    }
+    action t.credit(amount: u64) {
+        bound amount in 0..1000
+    }
+
+    check v.m_balance + a.m_balance >= 0
+    check t.m_total >= 0
+}

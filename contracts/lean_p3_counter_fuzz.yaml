@@ -1,0 +1,9 @@
+# Copyright (C) 2025-2026 The Cambrian Authors
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: lean-p3-counter-fuzz
+target: lean
+output_dir: /tmp/cambrian-lean-p3-counter-fuzz
+sources:
+  - counter.cam
+  - counter.fuzz.cam

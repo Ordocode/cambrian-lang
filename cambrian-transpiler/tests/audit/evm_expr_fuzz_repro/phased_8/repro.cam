@@ -1,0 +1,17 @@
+// Copyright (C) 2025-2026 The Cambrian Authors
+// SPDX-License-Identifier: GPL-3.0-only
+
+entity PhasedExpr {
+    routes {
+        bump(amount: u64) => [
+            inc: []
+            mirror: []
+        ]
+    }
+    m_a: u64 {
+        in bump(amount) => inc: m_a + amount
+    }
+    m_b: u64 {
+        in bump(amount) => mirror: ^m_a
+    }
+}
